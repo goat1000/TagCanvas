@@ -15,7 +15,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 /**
- * TagCanvas 2.1.1
+ * TagCanvas 2.1.2
  * For more information, please contact <graham@goat1000.com>
  */
 (function(){
@@ -331,17 +331,23 @@ function EventToCanvasId(e) {
   return e.target && Defined(e.target.id) ? e.target.id :
     e.srcElement.parentNode.id;
 }
-function EventXY(e, id) {
+function EventXY(e, c) {
+  var xy, p, xmul = parseInt(GetProperty(c, 'width')) / c.width,
+    ymul = parseInt(GetProperty(c, 'height')) / c.height;
   if(Defined(e.offsetX)) {
-    return {x: e.offsetX, y: e.offsetY};
+    xy = {x: e.offsetX, y: e.offsetY};
   } else {
-    var p = AbsPos(id);
+    p = AbsPos(c.id);
     if(Defined(e.changedTouches))
       e = e.changedTouches[0];
     if(e.pageX)
-      return {x: e.pageX - p.x, y: e.pageY - p.y};
+      xy = {x: e.pageX - p.x, y: e.pageY - p.y};
   }
-  return null;
+  if(xy && xmul && ymul) {
+    xy.x /= xmul;
+    xy.y /= ymul;
+  }
+  return xy;
 }
 function MouseOut(e) {
   var cv = e.target || e.fromElement.parentNode, tc = TagCanvas.tc[cv.id];
@@ -362,7 +368,7 @@ function MouseMove(e) {
   }
   if(tg && t.tc[tg]) {
     tc = t.tc[tg];
-    if(p = EventXY(e, tg)) {
+    if(p = EventXY(e, tc.canvas)) {
       tc.mx = p.x;
       tc.my = p.y;
       tc.Drag(e, p);
@@ -415,7 +421,7 @@ function TouchMove(e) {
   }
   if(tg && t.tc[tg] && e.changedTouches) {
     tc = t.tc[tg];
-    if(p = EventXY(e, tg)) {
+    if(p = EventXY(e, tc.canvas)) {
       tc.mx = p.x;
       tc.my = p.y;
       tc.Drag(e, p);
@@ -1237,7 +1243,7 @@ TCproto.Wheel = function(i) {
   this.Zoom(this.zoom);
 };
 TCproto.BeginDrag = function(e) {
-  this.down = EventXY(e, this.canvas.id);
+  this.down = EventXY(e, this.canvas);
   e.cancelBubble = true;
   e.returnValue = false;
   e.preventDefault && e.preventDefault();
