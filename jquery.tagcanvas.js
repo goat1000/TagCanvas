@@ -15,19 +15,20 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 /**
- * jQuery.tagcanvas 2.1.2
+ * jQuery.tagcanvas 2.2
  * For more information, please contact <graham@goat1000.com>
  */
 (function($){
 "use strict";
-var i, j, abs = Math.abs, sin = Math.sin, cos = Math.cos,
-  max = Math.max, min = Math.min, ceil = Math.ceil,
+var i, j, abs = Math.abs, sin = Math.sin, cos = Math.cos, max = Math.max,
+  min = Math.min, ceil = Math.ceil, sqrt = Math.sqrt, pow = Math.pow,
   hexlookup3 = {}, hexlookup2 = {}, hexlookup1 = {
   0:"0,",   1:"17,",  2:"34,",  3:"51,",  4:"68,",  5:"85,",
   6:"102,", 7:"119,", 8:"136,", 9:"153,", a:"170,", A:"170,",
   b:"187,", B:"187,", c:"204,", C:"204,", d:"221,", D:"221,",
   e:"238,", E:"238,", f:"255,", F:"255,"  
-}, Oproto, Tproto, TCproto, doc = document, ocanvas, handlers = {};
+  }, Oproto, Tproto, TCproto, Mproto, Vproto, TSproto, doc = document, ocanvas, 
+  handlers = {};
 for(i = 0; i < 256; ++i) {
   j = i.toString(16);
   if(i < 16)
@@ -35,13 +36,19 @@ for(i = 0; i < 256; ++i) {
   hexlookup2[j] = hexlookup2[j.toUpperCase()] = i.toString() + ',';
 }
 function Defined(d) {
-  return typeof(d) != 'undefined';
+  return typeof d != 'undefined';
+}
+function IsObject(o) {
+  return typeof o == 'object' && o != null;
 }
 function Clamp(v, mn, mx) {
   return isNaN(v) ? mx : min(mx, max(mn, v));
 }
 function Nop() {
   return false;
+}
+function TimeNow() {
+  return new Date().valueOf();
 }
 function SortList(l, f) {
   var nl = [], tl = l.length, i;
@@ -60,45 +67,94 @@ function Shuffle(a) {
     --i;
   }
 }
+function Vector(x, y, z) {
+  this.x = x;
+  this.y = y;
+  this.z = z;
+}
+Vproto = Vector.prototype;
+Vproto.length = function() {
+  return sqrt(this.x * this.x + this.y * this.y + this.z * this.z);
+};
+Vproto.dot = function(v) {
+  return this.x * v.x + this.y * v.y + this.z * v.z;
+};
+Vproto.cross = function(v) {
+  var x = this.y * v.z - this.z * v.y,
+    y = this.z * v.x - this.x * v.z,
+    z = this.x * v.y - this.y * v.x;
+  return new Vector(x, y, z);
+};
+Vproto.angle = function(v) {
+  var dot = this.dot(v), ac;
+  if(dot == 0)
+    return Math.PI / 2.0;
+  ac = dot / (this.length() * v.length());
+  if(ac >= 1)
+    return 0;
+  if(ac <= -1)
+    return Math.PI;
+  return Math.acos(ac);
+};
+Vproto.unit = function() {
+  var l = this.length();
+  return new Vector(this.x / l, this.y / l, this.z / l);
+};
+function MakeVector(lg, lt) {
+  lt = lt * Math.PI / 180;
+  lg = lg * Math.PI / 180;
+  var x = sin(lg) * cos(lt), y = -sin(lt), z = -cos(lg) * cos(lt);
+  return new Vector(x, y, z);
+}
 function Matrix(a) {
-  this[1] = {1: a[0],  2: a[1],  3: a[2],  4: a[3]};
-  this[2] = {1: a[4],  2: a[5],  3: a[6],  4: a[7]};
-  this[3] = {1: a[8],  2: a[9],  3: a[10], 4: a[11]};
-  this[4] = {1: a[12], 2: a[13], 3: a[14], 4: a[15]};
+  this[1] = {1: a[0],  2: a[1],  3: a[2]};
+  this[2] = {1: a[3],  2: a[4],  3: a[5]};
+  this[3] = {1: a[6],  2: a[7],  3: a[8]};
 }
+Mproto = Matrix.prototype;
 Matrix.Identity = function() {
-  return new Matrix([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+  return new Matrix([1,0,0, 0,1,0, 0,0,1]);
+};
+Matrix.Rotation = function(angle, u) {
+  var sina = sin(angle), cosa = cos(angle), mcos = 1 - cosa;
+  return new Matrix([
+    cosa + pow(u.x, 2) * mcos, u.x * u.y * mcos - u.z * sina, u.x * u.z * mcos + u.y * sina,
+    u.y * u.x * mcos + u.z * sina, cosa + pow(u.y, 2) * mcos, u.y * u.z * mcos - u.x * sina,
+    u.z * u.x * mcos - u.y * sina, u.z * u.y * mcos + u.x * sina, cosa + pow(u.z, 2) * mcos
+  ]);
 }
-Matrix.prototype.mul = function(m) {
-  var a = [], i, j;
-  for(i = 1; i <= 4; ++i)
-    for(j = 1; j <= 4; ++j)
-      a.push(this[i][1] * m[1][j] +
-        this[i][2] * m[2][j] +
-        this[i][3] * m[3][j] +
-        this[i][4] * m[4][j]);
+Mproto.mul = function(m) {
+  var a = [], i, j, mmatrix = (m.xform ? 1 : 0);
+  for(i = 1; i <= 3; ++i)
+    for(j = 1; j <= 3; ++j) {
+      if(mmatrix)
+        a.push(this[i][1] * m[1][j] +
+          this[i][2] * m[2][j] +
+          this[i][3] * m[3][j]);
+      else
+        a.push(this[i][j] * m);
+    }
   return new Matrix(a);
-}
-Matrix.prototype.xform = function(p) {
-  var a = {}, x = p.x, y = p.y, z = p.z, w = Defined(p.w) ? p.w : 1;
-  a.x = x * this[1][1] + y * this[2][1] + z * this[3][1] + w * this[4][1];
-  a.y = x * this[1][2] + y * this[2][2] + z * this[3][2] + w * this[4][2];
-  a.z = x * this[1][3] + y * this[2][3] + z * this[3][3] + w * this[4][3];
-  a.w = x * this[1][4] + y * this[2][4] + z * this[3][4] + w * this[4][4];
+};
+Mproto.xform = function(p) {
+  var a = {}, x = p.x, y = p.y, z = p.z;
+  a.x = x * this[1][1] + y * this[2][1] + z * this[3][1];
+  a.y = x * this[1][2] + y * this[2][2] + z * this[3][2];
+  a.z = x * this[1][3] + y * this[2][3] + z * this[3][3];
   return a;
-}
+};
 function PointsOnSphere(n,xr,yr,zr) {
-  var i, y, r, phi, pts = [], inc = Math.PI * (3-Math.sqrt(5)), off = 2/n;
+  var i, y, r, phi, pts = [], inc = Math.PI * (3-sqrt(5)), off = 2/n;
   for(i = 0; i < n; ++i) {
     y = i * off - 1 + (off / 2);
-    r = Math.sqrt(1 - y*y);
+    r = sqrt(1 - y*y);
     phi = i * inc;
     pts.push([cos(phi) * r * xr, y * yr, sin(phi) * r * zr]);
   }
   return pts;
 }
 function Cylinder(n,o,xr,yr,zr) {
-  var phi, pts = [], inc = Math.PI * (3-Math.sqrt(5)), off = 2/n, i, j, k, l;
+  var phi, pts = [], inc = Math.PI * (3-sqrt(5)), off = 2/n, i, j, k, l;
   for(i = 0; i < n; ++i) {
     j = i * off - 1 + (off / 2);
     phi = i * inc;
@@ -440,7 +496,7 @@ function MouseWheel(e) {
 }
 function DrawCanvas(t) {
   var tc = TagCanvas.tc, i, interval;
-  t = t || new Date().valueOf();
+  t = t || TimeNow();
   for(i in tc) {
     interval = tc[i].interval;
     tc[i].Draw(t);
@@ -475,8 +531,9 @@ function TextSplitter(e) {
   this.line = [];
   this.text = [];
   this.original = e.innerText || e.textContent;
-};
-TextSplitter.prototype.Lines = function(e) {
+}
+TSproto = TextSplitter.prototype;
+TSproto.Lines = function(e) {
   var r = e ? 1 : 0, cn, cl, i;
   e = e || this.e;
   cn = e.childNodes;
@@ -500,7 +557,7 @@ TextSplitter.prototype.Lines = function(e) {
   r || this.br || this.text.push(this.line.join(' '));
   return this.text;
 }
-TextSplitter.prototype.SplitWidth = function(w, c, f, h) {
+TSproto.SplitWidth = function(w, c, f, h) {
   var i, j, words, text = [];
   c.font = h + 'px ' + f;
   for(i = 0; i < this.text.length; ++i) {
@@ -522,7 +579,7 @@ TextSplitter.prototype.SplitWidth = function(w, c, f, h) {
  * @constructor
  */
 function Outline(tc) {
-  this.ts = new Date().valueOf();
+  this.ts = TimeNow();
   this.tc = tc;
   this.x = this.y = this.w = this.h = this.sc = 1;
   this.z = 0;
@@ -612,7 +669,7 @@ Oproto.DrawSimple = function(c, tag, x1, y1) {
   return this.drawFunc(c,this.x,this.y,this.w,this.h,t.outlineColour,tag,x1,y1);
 };
 Oproto.DrawPulsate = function(c, tag, x1, y1) {
-  var diff = new Date().valueOf() - this.ts, t = this.tc;
+  var diff = TimeNow() - this.ts, t = this.tc;
   c.setTransform(1,0,0,1,0,0);
   c.strokeStyle = t.outlineColour;
   c.lineWidth = t.outlineThickness;
@@ -638,7 +695,7 @@ function Tag(tc,text,a,v,w,h,col,font,original) {
   this.line_widths = [];
   this.title = a.title || null;
   this.a = a;
-  this.position = { x: v[0], y: v[1], z: v[2] };
+  this.position = new Vector(v[0], v[1], v[2]);
   this.x = this.y = this.z = 0;
   this.w = w;
   this.h = h;
@@ -764,16 +821,17 @@ Tproto.DrawImageIE = function(c,xoff,yoff) {
   c.globalAlpha = this.alpha;
   c.drawImage(i, x, y);
 };
-Tproto.Calc = function(m) {
+Tproto.Calc = function(m,a) {
   var pp, t = this.tc, mnb = t.minBrightness,
     mxb = t.maxBrightness, r = t.max_radius;
   pp = m.xform(this.position);
+  this.xformed = pp;
   pp = Project(t, pp, t.stretchX, t.stretchY);
   this.x = pp.x;
   this.y = pp.y;
   this.z = pp.z;
   this.sc = pp.w;
-  this.alpha = Clamp(mnb + (mxb - mnb) * (r - this.z) / (2 * r), 0, 1);
+  this.alpha = a * Clamp(mnb + (mxb - mnb) * (r - this.z) / (2 * r), 0, 1);
 };
 Tproto.CheckActive = function(c,xoff,yoff) {
   var t = this.tc, o = this.outline,
@@ -849,13 +907,14 @@ function TagCanvas(cid,lctr,opt) {
   this.ctxt.textBaseline = 'top';
   this.lx = (this.lock + '').indexOf('x') + 1;
   this.ly = (this.lock + '').indexOf('y') + 1;
-  this.frozen = 0;
-  this.dx = this.dy = 0;
-  this.touched = 0;
+  this.frozen = this.dx = this.dy = this.fixedAnim = this.touched = 0;
+  this.fixedAlpha = 1;
   this.source = lctr || cid;
   this.transform = Matrix.Identity();
-  this.time = new Date().valueOf();
+  this.startTime = this.time = TimeNow();
   this.Animate = this.dragControl ? this.AnimateDrag : this.AnimatePosition;
+  this.animTiming = (typeof TagCanvas[this.animTiming] == 'function' ?
+    TagCanvas[this.animTiming] : TagCanvas.Smooth);
   if(this.shadowBlur || this.shadowOffset[0] || this.shadowOffset[1]) {
     // let the browser translate "red" into "#ff0000"
     this.ctxt.shadowColor = this.shadow;
@@ -1076,7 +1135,7 @@ TCproto.Update = function() {
     this.shapeArgs[0] = nl = newlist.length;
     vl = this.shape.apply(this, this.shapeArgs);
     for(i = 0; i < nl; ++i)
-      newlist[i].position = { x: vl[i][0], y: vl[i][1], z: vl[i][2] };
+      newlist[i].position = new Vector(vl[i][0], vl[i][1], vl[i][2]);
 
     // reweight tags
     this.weight && this.Weight(newlist);
@@ -1095,14 +1154,15 @@ TCproto.Draw = function(t) {
     tdelta = (t - this.time) * this.interval / 1000,
     x = cw / 2 + this.offsetX, y = ch / 2 + this.offsetY, c = this.ctxt,
     active, a, i, aindex = -1, tl = this.taglist, l = tl.length,
-    frontsel = this.frontSelect, centreDrawn = (this.centreFunc == Nop);
+    frontsel = this.frontSelect, centreDrawn = (this.centreFunc == Nop), fixed;
   this.time = t;
   if(this.frozen && this.drawn)
     return this.Animate(cw,ch,tdelta);
+  fixed = this.AnimateFixed();
   c.setTransform(1,0,0,1,0,0);
   this.active = null;
   for(i = 0; i < l; ++i)
-    tl[i].Calc(this.transform);
+    tl[i].Calc(this.transform, this.fixedAlpha);
   tl = SortList(tl, function(a,b) {return b.z-a.z});
   
   for(i = 0; i < l; ++i) {
@@ -1117,7 +1177,6 @@ TCproto.Draw = function(t) {
   this.active = active;
 
   this.txtOpt || (this.shadow && this.SetShadow(c));
-
   c.clearRect(0,0,cw,ch);
   for(i = 0; i < l; ++i) {
     if(!centreDrawn && tl[i].z <= 0) {
@@ -1141,7 +1200,11 @@ TCproto.Draw = function(t) {
     this.UnFreeze();
     this.drawn = (l == this.listLength);
   }
-  this.Animate(cw, ch, tdelta);
+  if(this.fixedCallback) {
+    this.fixedCallback(this,this.fixedCallbackTag);
+    this.fixedCallback = null;
+  }
+  fixed || this.Animate(cw, ch, tdelta);
   active && active.LastDraw(c);
   cv.style.cursor = active ? this.activeCursor : '';
   this.Tooltip(active,this.taglist[aindex]);
@@ -1173,10 +1236,40 @@ TCproto.TooltipDiv = function(active,tag) {
 TCproto.Transform = function(tc, p, y) {
   if(p || y) {
     var sp = sin(p), cp = cos(p), sy = sin(y), cy = cos(y),
-      ym = new Matrix([cy,0,sy,0, 0,1,0,0, -sy,0,cy,0, 0,0,0,1]),
-      pm = new Matrix([1,0,0,0, 0,cp,-sp,0, 0,sp,cp,0, 0,0,0,1]);
+      ym = new Matrix([cy,0,sy, 0,1,0, -sy,0,cy]),
+      pm = new Matrix([1,0,0, 0,cp,-sp, 0,sp,cp]);
     tc.transform = tc.transform.mul(ym.mul(pm));
   }
+};
+TCproto.AnimateFixed = function() {
+  var fa, t1, angle, m, d;
+  if(this.fadeIn) {
+    t1 = TimeNow() - this.startTime;
+    if(t1 >= this.fadeIn) {
+      this.fadeIn = 0;
+      this.fixedAlpha = 1;
+    } else {
+      this.fixedAlpha = t1 / this.fadeIn;
+    }
+  }
+  if(this.fixedAnim) {
+    if(!this.fixedAnim.transform)
+      this.fixedAnim.transform = this.transform;
+    fa = this.fixedAnim, t1 = TimeNow() - fa.t0, angle = fa.angle,
+      m, d = this.animTiming(fa.t, t1);
+    this.transform = fa.transform;
+    if(t1 >= fa.t) {
+      this.fixedCallbackTag = fa.tag;
+      this.fixedCallback = fa.cb;
+      this.fixedAnim = this.yaw = this.pitch = 0;
+    } else {
+      angle *= d;
+    }
+    m = Matrix.Rotation(angle, fa.axis);
+    this.transform = this.transform.mul(m);
+    return (this.fixedAnim != 0);
+  }
+  return false;
 };
 TCproto.AnimatePosition = function(w, h, t) {
   var tc = this, x = tc.mx, y = tc.my, s, r;
@@ -1233,7 +1326,11 @@ TCproto.Zoom = function(r) {
 TCproto.Clicked = function(e) {
   var a = this.active;
   try {
-    a && a.tag && a.tag.Clicked(e);
+    if(a && a.tag)
+      if(this.clickToFront === false || this.clickToFront === null)
+        a.tag.Clicked(e);
+      else
+        this.TagToFront(a.tag, this.clickToFront, function() { a.tag.Clicked(e); });
   } catch(ex) {
   }
 };
@@ -1267,23 +1364,67 @@ TCproto.EndDrag = function() {
 };
 TCproto.Pause = function() { this.paused = true; };
 TCproto.Resume = function() { this.paused = false; };
+TCproto.FindTag = function(t) {
+  if(!Defined(t))
+    return null;
+  Defined(t.index) && (t = t.index);
+  if(!IsObject(t))
+    return this.taglist[t];
+  var srch, tgt, i;
+  if(Defined(t.id))
+    srch = 'id', tgt = t.id;
+  else if(Defined(t.text))
+    srch = 'innerText', tgt = t.text;
+
+  for(i = 0; i < this.taglist.length; ++i)
+    if(this.taglist[i].a[srch] == tgt)
+      return this.taglist[i];
+};
+TCproto.RotateTag = function(tag, lt, lg, time, callback) {
+  var t = tag.xformed, v1 = new Vector(t.x, t.y, t.z),
+    v2 = MakeVector(lg, lt), angle = v1.angle(v2), u = v1.cross(v2).unit();
+  if(angle == 0) {
+    this.fixedCallbackTag = tag;
+    this.fixedCallback = callback;
+  } else {
+    this.fixedAnim = {angle: -angle, axis: u, t: time, t0: TimeNow(), cb: callback, tag: tag};
+  }
+};
+TCproto.TagToFront = function(tag, time, callback) {
+  this.RotateTag(tag, 0, 0, time, callback);
+};
 TagCanvas.Start = function(id,l,o) {
   TagCanvas.tc[id] = new TagCanvas(id,l,o);
 };
 function tccall(f,id) {
   TagCanvas.tc[id] && TagCanvas.tc[id][f]();
 }
-TagCanvas.Pause = function(id) {
-  tccall('Pause',id);
+TagCanvas.Linear = function(t, t0) { return t0 / t; }
+TagCanvas.Smooth = function(t, t0) { return 0.5 - cos(t0 * Math.PI / t) / 2; }
+TagCanvas.Pause = function(id) { tccall('Pause',id); };
+TagCanvas.Resume = function(id) { tccall('Resume',id); };
+TagCanvas.Reload = function(id) { tccall('Load',id); };
+TagCanvas.Update = function(id) { tccall('Update',id); };
+TagCanvas.TagToFront = function(id, options) {
+  if(!IsObject(options))
+    return false;
+  options.lat = options.lng = 0;
+  return TagCanvas.RotateTag(id, options);
 };
-TagCanvas.Resume = function(id) {
-  tccall('Resume',id);
-};
-TagCanvas.Reload = function(id) {
-  tccall('Load',id);
-};
-TagCanvas.Update = function(id) {
-  tccall('Update',id);
+TagCanvas.RotateTag = function(id, options) {
+  if(!IsObject(options))
+    return false;
+  if(TagCanvas.tc[id]) {
+    if(isNaN(options['time']))
+      options.time = 500;
+    var tt = TagCanvas.tc[id].FindTag(options);
+    if(tt) {
+      TagCanvas.tc[id].RotateTag(tt, options['lat'], options['lng'], 
+        options['time'], options['callback']);
+      return true;
+    }
+  }
+  return false;
 };
 TagCanvas.NextFrame = function(iv) {
   var raf = window.requestAnimationFrame = window.requestAnimationFrame ||
@@ -1363,40 +1504,39 @@ paused: false,
 dragControl: false,
 dragThreshold: 4,
 centreFunc: Nop,
-splitWidth: 0
+splitWidth: 0,
+animTiming: 'Smooth',
+clickToFront: false,
+fadeIn: 0
 };
 for(i in TagCanvas.options) TagCanvas[i] = TagCanvas.options[i];
 window.TagCanvas = TagCanvas;
 jQuery.fn.tagcanvas = function(options, lctr) {
   var fn = {
     pause: function() {
-      $(this).each(function() {
-        tccall('Pause',$(this)[0].id);
-      });
+      $(this).each(function() { tccall('Pause',$(this)[0].id); });
     },
     resume: function() {
-      $(this).each(function() {
-        tccall('Resume',$(this)[0].id);
-      });
+      $(this).each(function() { tccall('Resume',$(this)[0].id); });
     },
     reload: function() {
-      $(this).each(function() {
-        tccall('Reload',$(this)[0].id);
-      });
+      $(this).each(function() { tccall('Load',$(this)[0].id); });
     },
     update: function() {
-      $(this).each(function() {
-        tccall('Update',$(this)[0].id);
-      });
+      $(this).each(function() { tccall('Update',$(this)[0].id); });
     },
+    tagtofront: function() {
+      $(this).each(function() { TagCanvas.TagToFront($(this)[0].id, lctr); });
+    },
+    rotatetag: function() {
+      $(this).each(function() { TagCanvas.RotateTag($(this)[0].id, lctr); });
+    }
   };
-  if(typeof(options) == 'string' && fn[options]) {
+  if(typeof options == 'string' && fn[options]) {
     fn[options].apply(this);
   } else {
     TagCanvas.jquery = 1;
-    $(this).each(function() {
-      TagCanvas.Start($(this)[0].id, lctr, options);
-    });
+    $(this).each(function() { TagCanvas.Start($(this)[0].id, lctr, options); });
     return TagCanvas.started;
   }
 };
