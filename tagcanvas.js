@@ -1426,6 +1426,10 @@ TagCanvas.RotateTag = function(id, options) {
   }
   return false;
 };
+TagCanvas.Delete = function(id) {
+  delete handlers[id];
+  delete TagCanvas.tc[id];
+};
 TagCanvas.NextFrame = function(iv) {
   var raf = window.requestAnimationFrame = window.requestAnimationFrame ||
     window.mozRequestAnimationFrame || window.webkitRequestAnimationFrame ||

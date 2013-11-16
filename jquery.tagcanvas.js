@@ -1426,6 +1426,10 @@ TagCanvas.RotateTag = function(id, options) {
   }
   return false;
 };
+TagCanvas.Delete = function(id) {
+  delete handlers[id];
+  delete TagCanvas.tc[id];
+};
 TagCanvas.NextFrame = function(iv) {
   var raf = window.requestAnimationFrame = window.requestAnimationFrame ||
     window.mozRequestAnimationFrame || window.webkitRequestAnimationFrame ||
@@ -1530,10 +1534,14 @@ jQuery.fn.tagcanvas = function(options, lctr) {
     },
     rotatetag: function() {
       $(this).each(function() { TagCanvas.RotateTag($(this)[0].id, lctr); });
+    },
+    'delete': function() {
+      $(this).each(function() { TagCanvas.Delete($(this)[0].id); });
     }
   };
   if(typeof options == 'string' && fn[options]) {
     fn[options].apply(this);
+    return this;
   } else {
     TagCanvas.jquery = 1;
     $(this).each(function() { TagCanvas.Start($(this)[0].id, lctr, options); });
