@@ -245,9 +245,40 @@ function FindGradientColour(t,p) {
   d = c.getImageData(~~((l-1)*p),0,1,1).data;
   return 'rgba(' + d[0] + ',' + d[1] + ',' + d[2] + ',' + (d[3]/255) + ')';
 }
-function TextSet(c,f,l,s,sc,sb,so,wm,wl) {
-  var xo = (sb || 0) + (so && so[0] < 0 ? abs(so[0]) : 0),
-    yo = (sb || 0) + (so && so[1] < 0 ? abs(so[1]) : 0), i, xc;
+function RoundRect(ctx, x, y, width, height, radius, fill, stroke) {
+  if (typeof stroke == "undefined" ) {
+    stroke = true;
+  }
+  if (typeof fill == "undefined" ) {
+    fill = true;
+  }
+  if (typeof radius === "undefined") {
+    radius = 5;
+  }
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + width - radius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+  ctx.lineTo(x + width, y + height - radius);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  ctx.lineTo(x + radius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+  
+  if (stroke) {
+    ctx.stroke();
+  }
+  if (fill) {
+    ctx.fill();
+  }
+}
+
+function TextSet(c,f,l,s,sc,sb,so,wm,wl,bgpX,bgpY) {
+  var bgpX = (bgpX || 0), bgpY = (bgpY || 0);
+  var xo = (sb || 0) + (so && so[0] < 0 ? abs(so[0]) : 0) + bgpX,
+    yo = (sb || 0) + (so && so[1] < 0 ? abs(so[1]) : 0) + bgpY, i, xc;
   c.font = f;
   c.textBaseline = 'top';
   c.fillStyle = l;
@@ -260,13 +291,18 @@ function TextSet(c,f,l,s,sc,sb,so,wm,wl) {
     yo += parseInt(f);
   }
 }
-function TextToCanvas(s,f,ht,w,h,l,sc,sb,so,padx,pady,wmax,wlist) {
+function TextToCanvas(s,f,ht,w,h,l,sc,sb,so,padx,pady,wmax,wlist,bgb,bgbs,bgbc,bgbr,bgpX,bgpY) {
   var cw = w + abs(so[0]) + sb + sb, ch = h + abs(so[1]) + sb + sb, cv, c;
-  cv = NewCanvas(cw+padx,ch+pady);
+  cv = NewCanvas(cw+padx+(bgpX*2),ch+pady+(bgpY*2));
   if(!cv)
     return null;
   c = cv.getContext('2d');
-  TextSet(c,f,l,s,sc,sb,so,wmax,wlist);
+  c.strokeStyle = bgbs;
+  c.fillStyle = bgbc;
+  if(bgb) {
+	  RoundRect(c, 0, 0, cv.width, cv.height, bgbr);	  
+  }
+  TextSet(c,f,l,s,sc,sb,so,wmax,wlist,bgpX,bgpY);
   return cv;
 }
 function AddShadowToImage(i,sc,sb,so) {
@@ -285,7 +321,7 @@ function AddShadowToImage(i,sc,sb,so) {
   c.drawImage(i, xo, yo, i.width, i.height);
   return cv;
 }
-function FindTextBoundingBox(s,f,ht) {
+function FindTextBoundingBox(s,f,ht,bgpX,bgpY) {
   var w = parseInt(s.toString().length * ht), h = parseInt(ht * 2 * s.length),
     cv = NewCanvas(w,h), c, idata, w1, h1, x, y, i, ex;
   if(!cv)
@@ -704,6 +740,12 @@ function Tag(tc,text,a,v,w,h,col,font,original) {
   this.weight = this.sc = this.alpha = 1;
   this.weighted = !tc.weight;
   this.outline = new Outline(tc);
+  this.bgBox = tc.bgBox;
+  this.bgBoxPadX = tc.bgBoxPadX;
+  this.bgBoxPadY = tc.bgBoxPadY;
+  this.bgBoxStroke = tc.bgBoxStroke;
+  this.bgBoxColor = tc.bgBoxColor;
+  this.bgBoxRadius = tc.bgBoxRadius;
   if(!this.image) {
     this.textHeight = tc.textHeight;
     this.extents = FindTextBoundingBox(this.text, this.textFont, this.textHeight);
@@ -743,7 +785,7 @@ Tproto.Measure = function(c,t) {
     c.font = f;
     cw = this.MeasureText(c);
     this.image = TextToCanvas(this.text, f, th, cw, s * this.h, this.colour,
-      t.shadow, s * t.shadowBlur, soff, s, s, cw, this.line_widths);
+      t.shadow, s * t.shadowBlur, soff, s, s, cw, this.line_widths, this.bgBox, this.bgBoxStroke, this.bgBoxColor, this.bgBoxRadius, this.bgBoxPadX, this.bgBoxPadY);
     if(this.image) {
       this.w = this.image.width / s;
       this.h = this.image.height / s;
@@ -1511,7 +1553,13 @@ centreFunc: Nop,
 splitWidth: 0,
 animTiming: 'Smooth',
 clickToFront: false,
-fadeIn: 0
+fadeIn: 0,
+bgBox: false,
+bgBoxPadX: 0,
+bgBoxPadY: 0,
+bgBoxStroke: "#FFFFFF",
+bgBoxColor: "#FFFFFF",
+bgBoxRadius: 0,
 };
 for(i in TagCanvas.options) TagCanvas[i] = TagCanvas.options[i];
 window.TagCanvas = TagCanvas;
