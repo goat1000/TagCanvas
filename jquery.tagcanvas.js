@@ -321,7 +321,7 @@ function AddShadowToImage(i,sc,sb,so) {
   c.drawImage(i, xo, yo, i.width, i.height);
   return cv;
 }
-function FindTextBoundingBox(s,f,ht,bgpX,bgpY) {
+function FindTextBoundingBox(s,f,ht) {
   var w = parseInt(s.toString().length * ht), h = parseInt(ht * 2 * s.length),
     cv = NewCanvas(w,h), c, idata, w1, h1, x, y, i, ex;
   if(!cv)
