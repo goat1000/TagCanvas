@@ -785,7 +785,7 @@ Tproto.Measure = function(c,t) {
     c.font = f;
     cw = this.MeasureText(c);
     this.image = TextToCanvas(this.text, f, th, cw, s * this.h, this.colour,
-      t.shadow, s * t.shadowBlur, soff, s, s, cw, this.line_widths, this.bgBox, this.bgBoxStroke, this.bgBoxColour, this.bgBoxRadius, this.bgBoxPadX, this.bgBoxPadY);
+      t.shadow, s * t.shadowBlur, soff, s, s, cw, this.line_widths, this.bgBox, this.bgBoxStroke, this.bgBoxColour, s * this.bgBoxRadius, s * this.bgBoxPadX, s * this.bgBoxPadY);
     if(this.image) {
       this.w = this.image.width / s;
       this.h = this.image.height / s;
