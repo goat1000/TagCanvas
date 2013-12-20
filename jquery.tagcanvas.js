@@ -744,7 +744,7 @@ function Tag(tc,text,a,v,w,h,col,font,original) {
   this.bgBoxPadX = tc.bgBoxPadX;
   this.bgBoxPadY = tc.bgBoxPadY;
   this.bgBoxStroke = tc.bgBoxStroke;
-  this.bgBoxColor = tc.bgBoxColor;
+  this.bgBoxColour = tc.bgBoxColour;
   this.bgBoxRadius = tc.bgBoxRadius;
   if(!this.image) {
     this.textHeight = tc.textHeight;
@@ -785,7 +785,7 @@ Tproto.Measure = function(c,t) {
     c.font = f;
     cw = this.MeasureText(c);
     this.image = TextToCanvas(this.text, f, th, cw, s * this.h, this.colour,
-      t.shadow, s * t.shadowBlur, soff, s, s, cw, this.line_widths, this.bgBox, this.bgBoxStroke, this.bgBoxColor, this.bgBoxRadius, this.bgBoxPadX, this.bgBoxPadY);
+      t.shadow, s * t.shadowBlur, soff, s, s, cw, this.line_widths, this.bgBox, this.bgBoxStroke, this.bgBoxColour, this.bgBoxRadius, this.bgBoxPadX, this.bgBoxPadY);
     if(this.image) {
       this.w = this.image.width / s;
       this.h = this.image.height / s;
@@ -1558,7 +1558,7 @@ bgBox: false,
 bgBoxPadX: 0,
 bgBoxPadY: 0,
 bgBoxStroke: "#FFFFFF",
-bgBoxColor: "#FFFFFF",
+bgBoxColour: "#FFFFFF",
 bgBoxRadius: 0,
 };
 for(i in TagCanvas.options) TagCanvas[i] = TagCanvas.options[i];
