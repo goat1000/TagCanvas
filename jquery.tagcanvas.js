@@ -680,7 +680,7 @@ Oproto.DrawColourImage = function(c,x,y,w,h,colour,tag,x1,y1) {
 	  var scale = tag.txtScale;
 	  var th = scale * tag.textHeight;
 	  var cw = tag.MeasureText(tag.tc.ctxt);
-	  tag.image = TextToCanvas(tag.text, th + 'px ' + tag.textFont, th, cw, th, tag.colour, tag.tc.shadow, scale * tag.tc.shadowBlur,	
+	  tag.image = TextToCanvas(tag.text, th + 'px ' + tag.textFont, th, cw, th-tag.bgBoxPadY, tag.colour, tag.tc.shadow, scale * tag.tc.shadowBlur,
 			  [scale * tag.tc.shadowOffset[0], scale * tag.tc.shadowOffset[1]], scale, scale, cw, tag.line_widths, true, colour, 
 			  colour, scale * tag.bgBoxRadius, scale * tag.bgBoxPadX, scale * tag.bgBoxPadY);
 	  tag.alpha = 1;
