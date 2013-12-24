@@ -279,6 +279,7 @@ function TextSet(c,f,l,s,sc,sb,so,wm,wl,bgpX,bgpY) {
   var bgpX = (bgpX || 0), bgpY = (bgpY || 0);
   var xo = (sb || 0) + (so && so[0] < 0 ? abs(so[0]) : 0) + bgpX,
     yo = (sb || 0) + (so && so[1] < 0 ? abs(so[1]) : 0) + bgpY, i, xc;
+
   c.font = f;
   c.textBaseline = 'top';
   c.fillStyle = l;
@@ -665,30 +666,45 @@ Oproto.DrawColourText = function(c,x,y,w,h,colour,tag,x1,y1) {
 Oproto.DrawColourImage = function(c,x,y,w,h,colour,tag,x1,y1) {
   var ccanvas = c.canvas, fx = ~~max(x,0), fy = ~~max(y,0), 
     fw = min(ccanvas.width - fx, w) + .5|0, fh = min(ccanvas.height - fy,h) + .5|0, cc;
-  if(ocanvas)
-    ocanvas.width = fw, ocanvas.height = fh;
-  else
-    ocanvas = NewCanvas(fw, fh);
+  if(ocanvas) {
+	  ocanvas.width = fw, ocanvas.height = fh;	  
+  }
+  else {		  
+	  ocanvas = NewCanvas(fw, fh);
+  }
   if(!ocanvas)
     return this.SetMethod('outline'); // if using IE and images, give up!
   cc = ocanvas.getContext('2d');
 
-  cc.drawImage(ccanvas,fx,fy,fw,fh,0,0,fw,fh);
-  c.clearRect(fx,fy,fw,fh);
-  tag.alpha = 1;
-  tag.Draw(c,x1,y1);
-  c.setTransform(1,0,0,1,0,0);
-  c.save();
-  c.beginPath();
-  c.rect(fx,fy,fw,fh);
-  c.clip();
-  c.globalCompositeOperation = 'source-in';
-  c.fillStyle = colour;
-  c.fillRect(fx,fy,fw,fh);
-  c.restore();
-  c.globalCompositeOperation = 'destination-over';
-  c.drawImage(ocanvas,0,0,fw,fh,fx,fy,fw,fh);
-  c.globalCompositeOperation = 'source-over';
+  if(tag.bgBox) {
+	  var scale = tag.txtScale;
+	  var th = scale * tag.textHeight;
+	  var cw = tag.MeasureText(tag.tc.ctxt);
+	  tag.image = TextToCanvas(tag.text, th + 'px ' + tag.textFont, th, cw, th, tag.colour, tag.tc.shadow, scale * tag.tc.shadowBlur,	
+			  [scale * tag.tc.shadowOffset[0], scale * tag.tc.shadowOffset[1]], scale, scale, cw, tag.line_widths, true, colour, 
+			  colour, scale * tag.bgBoxRadius, scale * tag.bgBoxPadX, scale * tag.bgBoxPadY);
+	  tag.alpha = 1;
+	  tag.Draw(c,x1,y1);
+  }
+  else {
+	  cc.drawImage(ccanvas,fx,fy,fw,fh,0,0,fw,fh);
+	  c.clearRect(fx,fy,fw,fh);
+	  tag.alpha = 1;
+	  tag.Draw(c,x1,y1);
+	  c.setTransform(1,0,0,1,0,0);
+	  c.save();
+	  c.beginPath();
+	  c.rect(fx,fy,fw,fh);
+	  c.clip();
+	  c.globalCompositeOperation = 'source-in';
+	  c.fillStyle = colour;
+	  c.fillRect(fx,fy,fw,fh);
+	  c.restore();
+	  c.globalCompositeOperation = 'destination-over';
+	  c.drawImage(ocanvas,0,0,fw,fh,fx,fy,fw,fh);
+	  c.globalCompositeOperation = 'source-over';	  
+  }
+  
   return 1;
 };
 Oproto.DrawBlock = function(c,x,y,w,h,colour) {
@@ -723,6 +739,7 @@ Oproto.PreDraw = Oproto.PostDraw = Oproto.LastDraw = Nop;
  * @constructor
  */
 function Tag(tc,text,a,v,w,h,col,font,original) {
+this.jrx = 0;
   var c = tc.ctxt;
   this.tc = tc;
   this.image = text.src ? text : null;
@@ -746,11 +763,13 @@ function Tag(tc,text,a,v,w,h,col,font,original) {
   this.bgBoxStroke = tc.bgBoxStroke;
   this.bgBoxColour = tc.bgBoxColour;
   this.bgBoxRadius = tc.bgBoxRadius;
+  this.txtScale = tc.txtScale;
   if(!this.image) {
     this.textHeight = tc.textHeight;
     this.extents = FindTextBoundingBox(this.text, this.textFont, this.textHeight);
     this.Measure(c,tc);
   }
+  this.oimage = this.image;
   this.SetShadowColour = tc.shadowAlpha ? this.SetShadowColourAlpha : this.SetShadowColourFixed;
   this.SetDraw(tc);
 }
@@ -880,7 +899,14 @@ Tproto.CheckActive = function(c,xoff,yoff) {
     w = this.w, h = this.h,
     x = this.x - w/2, y = this.y - h/2;
   o.Update(x, y, w, h, this.sc, this.z, xoff, yoff);
-  return o.Active(c, t.mx, t.my) ? o : null;
+
+  var result = o.Active(c, t.mx, t.my);
+  if(this.bgBox && !result && this.image != this.oimage) {
+	  this.image = this.oimage;
+	  this.Draw(c,xoff,yoff);
+  }
+  
+  return result ? o : null;
 };
 Tproto.Clicked = function(e) {
   var a = this.a, t = a.target, h = a.href, evt;
