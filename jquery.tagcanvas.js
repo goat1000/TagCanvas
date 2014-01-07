@@ -15,7 +15,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 /**
- * jQuery.tagcanvas 2.2
+ * jQuery.tagcanvas 2.2.1
  * For more information, please contact <graham@goat1000.com>
  */
 (function($){
@@ -1364,6 +1364,11 @@ TCproto.EndDrag = function() {
 };
 TCproto.Pause = function() { this.paused = true; };
 TCproto.Resume = function() { this.paused = false; };
+TCproto.SetSpeed = function(i) {
+  this.initial = i;
+  this.yaw = i[0] * this.maxSpeed;
+  this.pitch = i[1] * this.maxSpeed;
+};
 TCproto.FindTag = function(t) {
   if(!Defined(t))
     return null;
@@ -1405,6 +1410,14 @@ TagCanvas.Pause = function(id) { tccall('Pause',id); };
 TagCanvas.Resume = function(id) { tccall('Resume',id); };
 TagCanvas.Reload = function(id) { tccall('Load',id); };
 TagCanvas.Update = function(id) { tccall('Update',id); };
+TagCanvas.SetSpeed = function(id, speed) {
+  if(IsObject(speed) && TagCanvas.tc[id] &&
+    !isNaN(speed[0]) && !isNaN(speed[1])) {
+    TagCanvas.tc[id].SetSpeed(speed);
+    return true;
+  }
+  return false;
+};
 TagCanvas.TagToFront = function(id, options) {
   if(!IsObject(options))
     return false;
@@ -1412,9 +1425,7 @@ TagCanvas.TagToFront = function(id, options) {
   return TagCanvas.RotateTag(id, options);
 };
 TagCanvas.RotateTag = function(id, options) {
-  if(!IsObject(options))
-    return false;
-  if(TagCanvas.tc[id]) {
+  if(IsObject(options) && TagCanvas.tc[id]) {
     if(isNaN(options['time']))
       options.time = 500;
     var tt = TagCanvas.tc[id].FindTag(options);
@@ -1537,6 +1548,9 @@ jQuery.fn.tagcanvas = function(options, lctr) {
     },
     'delete': function() {
       $(this).each(function() { TagCanvas.Delete($(this)[0].id); });
+    },
+    setspeed: function() {
+      $(this).each(function() { TagCanvas.SetSpeed($(this)[0].id, lctr); });
     }
   };
   if(typeof options == 'string' && fn[options]) {
