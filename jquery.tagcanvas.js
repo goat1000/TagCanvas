@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2010-2013 Graham Breach
+ * Copyright (C) 2010-2014 Graham Breach
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published by
@@ -15,7 +15,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 /**
- * jQuery.tagcanvas 2.2.1
+ * jQuery.tagcanvas 2.3
  * For more information, please contact <graham@goat1000.com>
  */
 (function($){
@@ -578,9 +578,10 @@ TSproto.SplitWidth = function(w, c, f, h) {
 /**
  * @constructor
  */
-function Outline(tc) {
+function Outline(tc,t) {
   this.ts = TimeNow();
   this.tc = tc;
+  this.tag = t;
   this.x = this.y = this.w = this.h = this.sc = 1;
   this.z = 0;
   this.Draw = tc.pulsateTo < 1 && tc.outlineMethod != 'colour' ? this.DrawPulsate : this.DrawSimple;
@@ -703,7 +704,7 @@ function Tag(tc,text,a,v,w,h,col,font,original) {
   this.textFont = font || tc.textFont;
   this.weight = this.sc = this.alpha = 1;
   this.weighted = !tc.weight;
-  this.outline = new Outline(tc);
+  this.outline = new Outline(tc,this);
   if(!this.image) {
     this.textHeight = tc.textHeight;
     this.extents = FindTextBoundingBox(this.text, this.textFont, this.textHeight);
@@ -833,11 +834,14 @@ Tproto.Calc = function(m,a) {
   this.sc = pp.w;
   this.alpha = a * Clamp(mnb + (mxb - mnb) * (r - this.z) / (2 * r), 0, 1);
 };
-Tproto.CheckActive = function(c,xoff,yoff) {
-  var t = this.tc, o = this.outline,
-    w = this.w, h = this.h,
+Tproto.UpdateActive = function(c, xoff, yoff) {
+  var o = this.outline, w = this.w, h = this.h,
     x = this.x - w/2, y = this.y - h/2;
   o.Update(x, y, w, h, this.sc, this.z, xoff, yoff);
+  return o;
+};
+Tproto.CheckActive = function(c,xoff,yoff) {
+  var t = this.tc, o = this.UpdateActive(c, xoff, yoff);
   return o.Active(c, t.mx, t.my) ? o : null;
 };
 Tproto.Clicked = function(e) {
@@ -1015,6 +1019,7 @@ TCproto.CreateTag = function(e, p) {
 TCproto.UpdateTag = function(t, a) {
   var colour = this.textColour || GetProperty(a, 'color'),
     font = this.textFont || FixFont(GetProperty(a, 'font-family'));
+  t.a = a;
   t.title = a.title;
   if(t.colour != colour || t.textFont != font)
     t.SetFont(font, colour);
@@ -1160,21 +1165,25 @@ TCproto.Draw = function(t) {
     return this.Animate(cw,ch,tdelta);
   fixed = this.AnimateFixed();
   c.setTransform(1,0,0,1,0,0);
-  this.active = null;
   for(i = 0; i < l; ++i)
     tl[i].Calc(this.transform, this.fixedAlpha);
   tl = SortList(tl, function(a,b) {return b.z-a.z});
   
-  for(i = 0; i < l; ++i) {
-    a = this.mx >= 0 && this.my >= 0 && this.taglist[i].CheckActive(c, x, y);
-    if(a && a.sc > max_sc && (!frontsel || a.z <= 0)) {
-      active = a;
-      aindex = i;
-      active.tag = this.taglist[i];
-      max_sc = a.sc;
+  if(fixed && this.fixedAnim.active) {
+    active = this.fixedAnim.tag.UpdateActive(c, x, y);
+  } else {
+    this.active = null;
+    for(i = 0; i < l; ++i) {
+      a = this.mx >= 0 && this.my >= 0 && this.taglist[i].CheckActive(c, x, y);
+      if(a && a.sc > max_sc && (!frontsel || a.z <= 0)) {
+        active = a;
+        aindex = i;
+        active.tag = this.taglist[i];
+        max_sc = a.sc;
+      }
     }
+    this.active = active;
   }
-  this.active = active;
 
   this.txtOpt || (this.shadow && this.SetShadow(c));
   c.clearRect(0,0,cw,ch);
@@ -1330,7 +1339,9 @@ TCproto.Clicked = function(e) {
       if(this.clickToFront === false || this.clickToFront === null)
         a.tag.Clicked(e);
       else
-        this.TagToFront(a.tag, this.clickToFront, function() { a.tag.Clicked(e); });
+        this.TagToFront(a.tag, this.clickToFront, function() {
+          a.tag.Clicked(e);
+        }, true);
   } catch(ex) {
   }
 };
@@ -1385,18 +1396,26 @@ TCproto.FindTag = function(t) {
     if(this.taglist[i].a[srch] == tgt)
       return this.taglist[i];
 };
-TCproto.RotateTag = function(tag, lt, lg, time, callback) {
+TCproto.RotateTag = function(tag, lt, lg, time, callback, active) {
   var t = tag.xformed, v1 = new Vector(t.x, t.y, t.z),
     v2 = MakeVector(lg, lt), angle = v1.angle(v2), u = v1.cross(v2).unit();
   if(angle == 0) {
     this.fixedCallbackTag = tag;
     this.fixedCallback = callback;
   } else {
-    this.fixedAnim = {angle: -angle, axis: u, t: time, t0: TimeNow(), cb: callback, tag: tag};
+    this.fixedAnim = {
+      angle: -angle,
+      axis: u,
+      t: time,
+      t0: TimeNow(),
+      cb: callback,
+      tag: tag,
+      active: active
+    };
   }
 };
-TCproto.TagToFront = function(tag, time, callback) {
-  this.RotateTag(tag, 0, 0, time, callback);
+TCproto.TagToFront = function(tag, time, callback, active) {
+  this.RotateTag(tag, 0, 0, time, callback, active);
 };
 TagCanvas.Start = function(id,l,o) {
   TagCanvas.tc[id] = new TagCanvas(id,l,o);
@@ -1426,12 +1445,12 @@ TagCanvas.TagToFront = function(id, options) {
 };
 TagCanvas.RotateTag = function(id, options) {
   if(IsObject(options) && TagCanvas.tc[id]) {
-    if(isNaN(options['time']))
+    if(isNaN(options.time))
       options.time = 500;
     var tt = TagCanvas.tc[id].FindTag(options);
     if(tt) {
-      TagCanvas.tc[id].RotateTag(tt, options['lat'], options['lng'], 
-        options['time'], options['callback']);
+      TagCanvas.tc[id].RotateTag(tt, options.lat, options.lng,
+        options.time, options.callback, options.active);
       return true;
     }
   }
