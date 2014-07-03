@@ -15,7 +15,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 /**
- * TagCanvas 2.4
+ * TagCanvas 2.5
  * For more information, please contact <graham@goat1000.com>
  */
 (function(){
@@ -227,22 +227,32 @@ function ShadowAlphaBroken() {
   cv = null;
   return (i.data[0] > 0);
 }
-function FindGradientColour(t,p) {
-  var l = 1024, g = t.weightGradient, cv, c, i, gd, d;
-  if(t.gCanvas) {
-    c = t.gCanvas.getContext('2d');
+function SetGradient(c, l, o, g) {
+  var gd = c.createLinearGradient(0, 0, l, 0), i;
+  for(i in g)
+    gd.addColorStop(1 - i, g[i]);
+  c.fillStyle = gd;
+  c.fillRect(0, o, l, 1);
+}
+function FindGradientColour(tc, p, r) {
+  var l = 1024, h = 1, gl = tc.weightGradient, cv, c, i, d;
+  if(tc.gCanvas) {
+    c = tc.gCanvas.getContext('2d');
+    h = tc.gCanvas.height;
   } else {
-    t.gCanvas = cv = NewCanvas(l,1);
+    if(IsObject(gl[0]))
+      h = gl.length;
+    else
+      gl = [gl];
+    tc.gCanvas = cv = NewCanvas(l, h);
     if(!cv)
       return null;
     c = cv.getContext('2d');
-    gd = c.createLinearGradient(0,0,l,0);
-    for(i in g)
-      gd.addColorStop(1-i, g[i]);
-    c.fillStyle = gd;
-    c.fillRect(0,0,l,1);
+    for(i = 0; i < h; ++i)
+      SetGradient(c, l, i, gl[i]);
   }
-  d = c.getImageData(~~((l-1)*p),0,1,1).data;
+  r = max(min(r || 0, h - 1), 0);
+  d = c.getImageData(~~((l - 1) * p), r, 1, 1).data;
   return 'rgba(' + d[0] + ',' + d[1] + ',' + d[2] + ',' + (d[3]/255) + ')';
 }
 function TextSet(ctxt, font, colour, strings, pad, shadowColour, shadowBlur,
@@ -305,17 +315,35 @@ function TextToCanvas(strings, font, w, h, colour, bgColour, bgOutline,
     shadowOffsets, maxWeight, weights);
   return cv;
 }
-function AddBackgroundToImage(i, colour, othickness, ocolour, padding, radius,
-  ofill) {
-  var cw = i.width + (2 * padding) + othickness,
-    ch = i.height + (2 * padding) + othickness,
+function ExpandImage(i, w, h) {
+  var cv = NewCanvas(w, h), c;
+  if(!cv)
+    return null;
+  c = cv.getContext('2d');
+  c.drawImage(i, (w - i.width) / 2, (h - i.height) / 2);
+  return cv;
+}
+function ScaleImage(i, w, h) {
+  var cv = NewCanvas(w, h), c;
+  if(!cv)
+    return null;
+  c = cv.getContext('2d');
+  c.drawImage(i, 0, 0, w, h);
+  return cv;
+}
+function AddBackgroundToImage(i, w, h, scale, colour, othickness, ocolour,
+  padding, radius, ofill) {
+  var cw = w + ((2 * padding) + othickness) * scale,
+    ch = h + ((2 * padding) + othickness) * scale,
     cv = NewCanvas(cw, ch), c, x1, y1, x2, y2, ocanvas, cc;
   if(!cv)
     return null;
+  othickness *= scale;
+  radius *= scale;
   x1 = y1 = othickness / 2;
   x2 = cw - othickness;
   y2 = ch - othickness;
-  padding += x1; // add space for outline
+  padding = (padding * scale) + x1; // add space for outline
   c = cv.getContext('2d');
   if(colour) {
     c.fillStyle = colour;
@@ -326,11 +354,12 @@ function AddBackgroundToImage(i, colour, othickness, ocolour, padding, radius,
     c.lineWidth = othickness;
     RRect(c, x1, y1, x2, y2, radius, true);
   }
+  
   if(ofill) {
     // use compositing to colour in the image and border
     ocanvas = NewCanvas(cw, ch);
     cc = ocanvas.getContext('2d');
-    cc.drawImage(i, padding, padding, i.width, i.height);
+    cc.drawImage(i, padding, padding, w, h);
     cc.globalCompositeOperation = 'source-in';
     cc.fillStyle = ocolour;
     cc.fillRect(0, 0, cw, ch);
@@ -341,23 +370,27 @@ function AddBackgroundToImage(i, colour, othickness, ocolour, padding, radius,
   } else {
     c.drawImage(i, padding, padding, i.width, i.height);
   }
-  return cv;
+  return {image: cv, width: cw / scale, height: ch / scale};
 }
-function AddShadowToImage(i,sc,sb,so) {
-  var sw = abs(so[0]), sh = abs(so[1]),
-    cw = i.width + (sw > sb ? sw + sb : sb * 2),
-    ch = i.height + (sh > sb ? sh + sb : sb * 2),
-    xo = (sb || 0) + (so[0] < 0 ? sw : 0),
-    yo = (sb || 0) + (so[1] < 0 ? sh : 0), cv, c;
+/**
+ * Creates a new canvas containing the image and its shadow
+ * Returns an object containing the image and its dimensions at z=0
+ */
+function AddShadowToImage(i, w, h, scale, sc, sb, so) {
+  var sw = abs(so[0]), sh = abs(so[1]), 
+    cw = w + (sw > sb ? sw + sb : sb * 2) * scale,
+    ch = h + (sh > sb ? sh + sb : sb * 2) * scale,
+    xo = scale * ((sb || 0) + (so[0] < 0 ? sw : 0)),
+    yo = scale * ((sb || 0) + (so[1] < 0 ? sh : 0)), cv, c;
   cv = NewCanvas(cw, ch);
   if(!cv)
     return null;
   c = cv.getContext('2d');
   sc && (c.shadowColor = sc);
-  sb && (c.shadowBlur = sb);
-  so && (c.shadowOffsetX = so[0], c.shadowOffsetY = so[1]);
-  c.drawImage(i, xo, yo, i.width, i.height);
-  return cv;
+  sb && (c.shadowBlur = sb * scale);
+  so && (c.shadowOffsetX = so[0] * scale, c.shadowOffsetY = so[1] * scale);
+  c.drawImage(i, xo, yo, w, h);
+  return {image: cv, width: cw / scale, height: ch / scale};
 }
 function FindTextBoundingBox(s,f,ht) {
   var w = parseInt(s.toString().length * ht), h = parseInt(ht * 2 * s.length),
@@ -410,7 +443,7 @@ function AddHandler(h,f,e) {
     e.attachEvent('on' + h, f);
 }
 function AddImage(i, o, t, tc) {
-  var s = tc.imageScale, ic, bc, oc;
+  var s = tc.imageScale, mscale, ic, bc, oc, iw, ih;
   // image not loaded, wait for image onload
   if(!o.complete)
     return AddHandler('load',function() { AddImage(i,o,t,tc); }, o);
@@ -428,13 +461,28 @@ function AddImage(i, o, t, tc) {
     i.width = o.width * s;
     i.height = o.height * s;
   }
+  // the standard width of the image, with imageScale applied
   t.w = i.width;
   t.h = i.height;
   if(tc.txtOpt) {
-    if(tc.shadow) {
-      ic = AddShadowToImage(i, tc.shadow, tc.shadowBlur, tc.shadowOffset);
-      if(ic) {
+    ic = i;
+    mscale = tc.zoomMax * tc.txtScale;
+    iw = t.w * mscale;
+    ih = t.h * mscale;
+    if(iw < o.naturalWidth || ih < o.naturalHeight) {
+      ic = ScaleImage(i, iw, ih);
+      if(ic)
         t.image = ic;
+    } else {
+      iw = t.w;
+      ih = t.h;
+      mscale = 1;
+    }
+    if(tc.shadow) {
+      ic = AddShadowToImage(t.image, iw, ih, mscale, tc.shadow, tc.shadowBlur,
+        tc.shadowOffset);
+      if(ic) {
+        t.image = ic.image;
         t.w = ic.width;
         t.h = ic.height;
       }
@@ -444,16 +492,37 @@ function AddImage(i, o, t, tc) {
         tc.bgColour;
       oc = tc.bgOutline == 'tag' ? GetProperty(t.a, 'color') : 
         (tc.bgOutline || tc.textColour);
-      ic = AddBackgroundToImage(t.image, bc, tc.bgOutlineThickness, oc,
-        tc.padding, tc.bgRadius);
+      iw = t.image.width;
+      ih = t.image.height;
       if(tc.outlineMethod == 'colour') {
-        t.oimage = AddBackgroundToImage(t.image, bc, tc.bgOutlineThickness,
-          tc.outlineColour, tc.padding, tc.bgRadius, true);
+        // create the outline version first, using the current image state
+        ic = AddBackgroundToImage(t.image, iw, ih, mscale, bc,
+          tc.bgOutlineThickness, tc.outlineColour, tc.padding, tc.bgRadius, 1);
+        if(ic)
+          t.oimage = ic.image;
       }
+      ic = AddBackgroundToImage(t.image, iw, ih, mscale, bc, 
+        tc.bgOutlineThickness, oc, tc.padding, tc.bgRadius);
       if(ic) {
-        t.image = ic;
+        t.image = ic.image;
         t.w = ic.width;
         t.h = ic.height;
+      }
+    }
+    if(tc.outlineMethod == 'size') {
+      if(tc.outlineIncrease > 0) {
+        t.w += 2 * tc.outlineIncrease;
+        t.h += 2 * tc.outlineIncrease;
+        iw = mscale * t.w;
+        ih = mscale * t.h;
+        ic = ScaleImage(t.image, iw, ih);
+        t.oimage = ic;
+        t.image = ExpandImage(t.image, t.oimage.width, t.oimage.height);
+      } else {
+        iw = mscale * (t.w + (2 * tc.outlineIncrease));
+        ih = mscale * (t.h + (2 * tc.outlineIncrease));
+        ic = ScaleImage(t.image, iw, ih);
+        t.oimage = ExpandImage(ic, t.image.width, t.image.height);
       }
     }
   }
@@ -463,16 +532,14 @@ function GetProperty(e,p) {
   return (dv && dv.getComputedStyle && dv.getComputedStyle(e,null).getPropertyValue(p)) ||
     (e.currentStyle && e.currentStyle[pc]);
 }
-function FindWeight(t,a) {
+function FindWeight(a, wFrom, tHeight) {
   var w = 1, p;
-  if(t.weightFrom) {
-    w = 1 * (a.getAttribute(t.weightFrom) || t.textHeight);
+  if(wFrom) {
+    w = 1 * (a.getAttribute(wFrom) || tHeight);
   } else if(p = GetProperty(a,'font-size')) {
     w = (p.indexOf('px') > -1 && p.replace('px','') * 1) ||
       (p.indexOf('pt') > -1 && p.replace('pt','') * 1.25) ||
       p * 3.3;
-  } else {
-    t.weight = false;
   }
   return w;
 }
@@ -689,6 +756,7 @@ Oproto.SetMethod = function(om) {
     colour: ['PreDraw','DrawColour'],
     outline: ['PostDraw','DrawOutline'],
     classic: ['LastDraw','DrawOutline'],
+    size: ['PreDraw','DrawColour'],
     none: ['LastDraw']
   }, funcs = methods[om] || methods.outline;
   if(om == 'none') {
@@ -808,12 +876,11 @@ function Tag(tc, text, a, v, w, h, col, bcol, bradius, boutline, bothickness,
   this.bgOutlineThickness = bothickness | 0;
   this.textFont = font || tc.textFont;
   this.padding = padding | 0;
-  this.weight = this.sc = this.alpha = 1;
+  this.sc = this.alpha = 1;
   this.weighted = !tc.weight;
   this.outline = new Outline(tc,this);
   if(!this.image) {
     this.textHeight = tc.textHeight;
-    this.extents = FindTextBoundingBox(this.text, this.textFont, this.textHeight);
     this.Measure(c,tc);
   }
   this.SetShadowColour = tc.shadowAlpha ? this.SetShadowColourAlpha : this.SetShadowColourFixed;
@@ -841,24 +908,45 @@ Tproto.MeasureText = function(c) {
   return w;
 };
 Tproto.Measure = function(c,t) {
-  this.h = this.extents ? this.extents.max.y + this.extents.min.y : this.textHeight;
+  var extents = FindTextBoundingBox(this.text, this.textFont, this.textHeight),
+    s, th, f, soff, cw;
+  // add the gap at the top to the height to make equal gap at bottom
+  this.h = extents ? extents.max.y + extents.min.y : this.textHeight;
   c.font = this.font = this.textHeight + 'px ' + this.textFont;
   this.w = this.MeasureText(c);
   if(t.txtOpt) {
-    var s = t.txtScale, th = s * this.textHeight, f = th + 'px ' + this.textFont,
-      soff = [s*t.shadowOffset[0],s*t.shadowOffset[1]], cw;
+    s = t.txtScale;
+    th = s * this.textHeight;
+    f = th + 'px ' + this.textFont;
+    soff = [s * t.shadowOffset[0], s * t.shadowOffset[1]];
     c.font = f;
     cw = this.MeasureText(c);
     this.image = TextToCanvas(this.text, f, cw + s, (s * this.h) + s, 
       this.colour, this.bgColour, this.bgOutline, s * this.bgOutlineThickness,
       t.shadow, s * t.shadowBlur, soff, s * this.padding, s * this.bgRadius,
       cw, this.line_widths);
-    // add another image using highlight colour
-    if(t.outlineMethod == 'colour')
+    // add outline image using highlight colour
+    if(t.outlineMethod == 'colour') {
       this.oimage = TextToCanvas(this.text, f, cw + s, (s * this.h) + s, 
         t.outlineColour, this.bgColour, t.outlineColour,
         s * this.bgOutlineThickness, t.shadow, s * t.shadowBlur, soff,
         s * this.padding, s * this.bgRadius, cw, this.line_widths);
+    } else if(t.outlineMethod == 'size') {
+      extents = FindTextBoundingBox(this.text, this.textFont,
+        this.textHeight + t.outlineIncrease);
+      th = extents.max.y + extents.min.y;
+      f = (s * (this.textHeight + t.outlineIncrease)) + 'px ' + this.textFont;
+      c.font = f;
+      cw = this.MeasureText(c);
+      this.oimage = TextToCanvas(this.text, f, cw + s, (s * th) + s, 
+        this.colour, this.bgColour, this.bgOutline, s * this.bgOutlineThickness,
+        t.shadow, s * t.shadowBlur, soff, s * this.padding, s * this.bgRadius,
+        cw, this.line_widths);
+      if(t.outlineIncrease > 0)
+        this.image = ExpandImage(this.image, this.oimage.width, this.oimage.height);
+      else
+        this.oimage = ExpandImage(this.oimage, this.image.width, this.image.height);
+    }
     if(this.image) {
       this.w = this.image.width / s;
       this.h = this.image.height / s;
@@ -870,31 +958,42 @@ Tproto.Measure = function(c,t) {
 Tproto.SetFont = function(f, c) {
   this.textFont = f;
   this.colour = c;
-  this.extents = FindTextBoundingBox(this.text, this.textFont, this.textHeight);
   this.Measure(this.tc.ctxt, this.tc);
 };
 Tproto.SetWeight = function(w) {
+  var tc = this.tc, modes = tc.weightMode.split(/[, ]/), m, s, wl = w.length;
   if(!this.text.length)
     return;
-  this.weight = w;
-  this.Weight(this.tc.ctxt, this.tc);
-  this.Measure(this.tc.ctxt, this.tc);
-};
-Tproto.Weight = function(c,t) {
-  var w = this.weight, m = t.weightMode;
   this.weighted = true;
-  if(m == 'colour' || m == 'both')
-    this.colour = FindGradientColour(t, (w - t.min_weight) / (t.max_weight-t.min_weight));
-  if(m == 'size' || m == 'both') {
+  for(s = 0; s < wl; ++s) {
+    m = modes[s] || 'size';
+    if('both' == m) {
+      this.Weight(w[s], tc.ctxt, tc, 'size', tc.min_weight[s], 
+        tc.max_weight[s], s);
+      this.Weight(w[s], tc.ctxt, tc, 'colour', tc.min_weight[s],
+        tc.max_weight[s], s);
+    } else {
+      this.Weight(w[s], tc.ctxt, tc, m, tc.min_weight[s], tc.max_weight[s], s);
+    }
+  }
+  this.Measure(tc.ctxt, tc);
+};
+Tproto.Weight = function(w, c, t, m, wmin, wmax, wnum) {
+  var nweight = (w - wmin) / (wmax - wmin);
+  if('colour' == m)
+    this.colour = FindGradientColour(t, nweight, wnum);
+  else if('bgcolour' == m)
+    this.bgColour = FindGradientColour(t, nweight, wnum);
+  else if('bgoutline' == m)
+    this.bgOutline = FindGradientColour(t, nweight, wnum);
+  else if('size' == m) {
     if(t.weightSizeMin > 0 && t.weightSizeMax > t.weightSizeMin) {
       this.textHeight = t.weightSize * 
-        (t.weightSizeMin + (t.weightSizeMax - t.weightSizeMin) *
-         (w - t.min_weight) / (t.max_weight - t.min_weight));
+        (t.weightSizeMin + (t.weightSizeMax - t.weightSizeMin) * nweight);
     } else {
       this.textHeight = w * t.weightSize;
     }
   }
-  this.extents = FindTextBoundingBox(this.text, this.textFont, this.textHeight);
 };
 Tproto.SetShadowColourFixed = function(c,s,a) {
   c.shadowColor = s;
@@ -1015,8 +1114,8 @@ function TagCanvas(cid,lctr,opt) {
   this.z1 = 250 / this.depth;
   this.z2 = this.z1 / this.zoom;
   this.radius = min(c.height, c.width) * 0.0075; // fits radius of 100 in canvas
-  this.max_weight = 0;
-  this.min_weight = 200;
+  this.max_weight = [];
+  this.min_weight = [];
   this.textFont = this.textFont && FixFont(this.textFont);
   this.textHeight *= 1;
   this.pulsateTo = Clamp(this.pulsateTo, 0, 1);
@@ -1143,15 +1242,26 @@ TCproto.UpdateTag = function(t, a) {
     t.SetFont(font, colour);
 };
 TCproto.Weight = function(tl) {
-  var l = tl.length, w, i, weights = [];
-  for(i = 0; i < l; ++i) {
-    w = FindWeight(this, tl[i].a);
-    if(w > this.max_weight) this.max_weight = w;
-    if(w < this.min_weight) this.min_weight = w;
-    weights.push(w);
+  var ll = tl.length, w, i, s, weights = [], valid,
+    wfrom = this.weightFrom ? this.weightFrom.split(/[, ]/) : [null],
+    wl = wfrom.length;
+  for(i = 0; i < ll; ++i) {
+    weights[i] = [];
+    for(s = 0; s < wl; ++s) {
+      w = FindWeight(tl[i].a, wfrom[s], this.textHeight);
+      if(!this.max_weight[s] || w > this.max_weight[s])
+        this.max_weight[s] = w;
+      if(!this.min_weight[s] || w < this.min_weight[s])
+        this.min_weight[s] = w;
+      weights[i][s] = w;
+    }
   }
-  if(this.max_weight > this.min_weight) {
-    for(i = 0; i < l; ++i) {
+  for(s = 0; s < wl; ++s) {
+    if(this.max_weight[s] > this.min_weight[s])
+      valid = 1;
+  }
+  if(valid) {
+    for(i = 0; i < ll; ++i) {
       tl[i].SetWeight(weights[i]);
     }
   }
@@ -1665,7 +1775,8 @@ padding: 0,
 bgColour: null,
 bgRadius: 0,
 bgOutline: null,
-bgOutlineThickness: 0
+bgOutlineThickness: 0,
+outlineIncrease: 4
 };
 for(i in TagCanvas.options) TagCanvas[i] = TagCanvas.options[i];
 window.TagCanvas = TagCanvas;
