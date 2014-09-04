@@ -15,7 +15,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 /**
- * jQuery.tagcanvas 2.5
+ * jQuery.tagcanvas 2.5.1
  * For more information, please contact <graham@goat1000.com>
  */
 (function($){
@@ -258,15 +258,15 @@ function FindGradientColour(tc, p, r) {
 function TextSet(ctxt, font, colour, strings, pad, shadowColour, shadowBlur,
   shadowOffsets, maxWeight, weights) {
   var xo = pad + (shadowBlur || 0) + 
-    (shadowOffsets && shadowOffsets[0] < 0 ? abs(shadowOffsets[0]) : 0),
+    (shadowOffsets.length && shadowOffsets[0] < 0 ? abs(shadowOffsets[0]) : 0),
     yo = pad + (shadowBlur || 0) + 
-    (shadowOffsets && shadowOffsets[1] < 0 ? abs(shadowOffsets[1]) : 0), i, xc;
+    (shadowOffsets.length && shadowOffsets[1] < 0 ? abs(shadowOffsets[1]) : 0), i, xc;
   ctxt.font = font;
   ctxt.textBaseline = 'top';
   ctxt.fillStyle = colour;
   shadowColour && (ctxt.shadowColor = shadowColour);
   shadowBlur && (ctxt.shadowBlur = shadowBlur);
-  shadowOffsets && (ctxt.shadowOffsetX = shadowOffsets[0],
+  shadowOffsets.length && (ctxt.shadowOffsetX = shadowOffsets[0],
     ctxt.shadowOffsetY = shadowOffsets[1]);
   for(i = 0; i < strings.length; ++i) {
     xc = weights ? (maxWeight - weights[i]) / 2 : 0;
@@ -654,14 +654,15 @@ function MouseWheel(e) {
     t.tc[tg].Wheel((e.wheelDelta || e.detail) > 0);
   }
 }
-function DrawCanvas(t) {
-  var tc = TagCanvas.tc, i, interval;
+function DrawCanvas() {
+  DrawCanvasRAF(TimeNow());
+}
+function DrawCanvasRAF(t) {
+  var tc = TagCanvas.tc, i;
+  TagCanvas.NextFrame(TagCanvas.interval);
   t = t || TimeNow();
-  for(i in tc) {
-    interval = tc[i].interval;
+  for(i in tc)
     tc[i].Draw(t);
-  }
-  TagCanvas.NextFrame(interval);
 }
 function AbsPos(id) {
   var e = doc.getElementById(id), r = e.getBoundingClientRect(),
@@ -955,9 +956,11 @@ Tproto.Measure = function(c,t) {
     t.txtOpt = !!this.image;
   }
 };
-Tproto.SetFont = function(f, c) {
+Tproto.SetFont = function(f, c, bc, boc) {
   this.textFont = f;
   this.colour = c;
+  this.bgColour = bc;
+  this.bgOutline = boc;
   this.Measure(this.tc.ctxt, this.tc);
 };
 Tproto.SetWeight = function(w) {
@@ -979,6 +982,7 @@ Tproto.SetWeight = function(w) {
   this.Measure(tc.ctxt, tc);
 };
 Tproto.Weight = function(w, c, t, m, wmin, wmax, wnum) {
+  w = isNaN(w) ? 1 : w;
   var nweight = (w - wmin) / (wmax - wmin);
   if('colour' == m)
     this.colour = FindGradientColour(t, nweight, wnum);
@@ -991,7 +995,8 @@ Tproto.Weight = function(w, c, t, m, wmin, wmax, wnum) {
       this.textHeight = t.weightSize * 
         (t.weightSizeMin + (t.weightSizeMax - t.weightSizeMin) * nweight);
     } else {
-      this.textHeight = w * t.weightSize;
+      // min textHeight of 1
+      this.textHeight = max(1, w * t.weightSize);
     }
   }
 };
@@ -1090,7 +1095,7 @@ Tproto.Clicked = function(e) {
  * @constructor
  */
 function TagCanvas(cid,lctr,opt) {
-  var i, p, c = doc.getElementById(cid), cp = ['id','class','innerHTML'];
+  var i, p, c = doc.getElementById(cid), cp = ['id','class','innerHTML'], raf;
 
   if(!c) throw 0;
   if(Defined(window.G_vmlCanvasManager)) {
@@ -1187,7 +1192,16 @@ function TagCanvas(cid,lctr,opt) {
     }
     handlers[cid] = 1;
   }
-  TagCanvas.started || (TagCanvas.started = setTimeout(DrawCanvas, this.interval));
+  if(!TagCanvas.started) {
+    raf = window.requestAnimationFrame = window.requestAnimationFrame ||
+      window.mozRequestAnimationFrame || window.webkitRequestAnimationFrame ||
+      window.msRequestAnimationFrame;
+    TagCanvas.NextFrame = raf ? TagCanvas.NextFrameRAF :
+      TagCanvas.NextFrameTimeout;
+    TagCanvas.interval = this.interval;
+    TagCanvas.NextFrame(this.interval);
+    TagCanvas.started = 1;
+  }
 }
 TCproto = TagCanvas.prototype;
 TCproto.SourceElements = function() {
@@ -1235,11 +1249,15 @@ TCproto.CreateTag = function(e, p) {
 };
 TCproto.UpdateTag = function(t, a) {
   var colour = this.textColour || GetProperty(a, 'color'),
-    font = this.textFont || FixFont(GetProperty(a, 'font-family'));
+    font = this.textFont || FixFont(GetProperty(a, 'font-family')),
+    bc = this.bgColour == 'tag' ? GetProperty(a, 'background-color') :
+      this.bgColour, boc = this.bgOutline == 'tag' ? GetProperty(a, 'color') :
+      this.bgOutline;
   t.a = a;
   t.title = a.title;
-  if(t.colour != colour || t.textFont != font)
-    t.SetFont(font, colour);
+  if(t.colour != colour || t.textFont != font || t.bgColour != bc ||
+    t.bgOutline != boc)
+    t.SetFont(font, colour, bc, boc);
 };
 TCproto.Weight = function(tl) {
   var ll = tl.length, w, i, s, weights = [], valid,
@@ -1384,7 +1402,7 @@ TCproto.Draw = function(t) {
   if(this.paused)
     return;
   var cv = this.canvas, cw = cv.width, ch = cv.height, max_sc = 0,
-    tdelta = (t - this.time) * this.interval / 1000,
+    tdelta = (t - this.time) * TagCanvas.interval / 1000,
     x = cw / 2 + this.offsetX, y = ch / 2 + this.offsetY, c = this.ctxt,
     active, a, i, aindex = -1, tl = this.taglist, l = tl.length,
     frontsel = this.frontSelect, centreDrawn = (this.centreFunc == Nop), fixed;
@@ -1448,11 +1466,11 @@ TCproto.Draw = function(t) {
 };
 TCproto.TooltipNone = function() { };
 TCproto.TooltipNative = function(active,tag) {
-  this.canvas.title = active && tag.title ? tag.title : '';
+  this.canvas.title = active && tag && tag.title ? tag.title : '';
 };
 TCproto.TooltipDiv = function(active,tag) {
   var tc = this, s = tc.ttdiv.style, cid = tc.canvas.id, none = 'none';
-  if(active && tag.title) {
+  if(active && tag && tag.title) {
     if(tag.title != tc.ttdiv.innerHTML)
       s.display = none;
     tc.ttdiv.innerHTML = tag.title;
@@ -1512,8 +1530,8 @@ TCproto.AnimatePosition = function(w, h, t) {
   var tc = this, x = tc.mx, y = tc.my, s, r;
   if(!tc.frozen && x >= 0 && y >= 0 && x < w && y < h) {
     s = tc.maxSpeed, r = tc.reverse ? -1 : 1;
-    tc.lx || (tc.yaw = r * t * ((s * 2 * x / w) - s));
-    tc.ly || (tc.pitch = r * t * -((s * 2 * y / h) - s));
+    tc.lx || (tc.yaw = ((x * 2 * s / w) - s) * r * t);
+    tc.ly || (tc.pitch = ((y * 2 * s / h) - s) * -r * t);
     tc.initial = null;
   } else if(!tc.initial) {
     if(tc.frozen && !tc.freezeDecel)
@@ -1688,15 +1706,8 @@ TagCanvas.Delete = function(id) {
   delete handlers[id];
   delete TagCanvas.tc[id];
 };
-TagCanvas.NextFrame = function(iv) {
-  var raf = window.requestAnimationFrame = window.requestAnimationFrame ||
-    window.mozRequestAnimationFrame || window.webkitRequestAnimationFrame ||
-    window.msRequestAnimationFrame;
-  TagCanvas.NextFrame = raf ? TagCanvas.NextFrameRAF : TagCanvas.NextFrameTimeout;
-  TagCanvas.NextFrame(iv);
-};
 TagCanvas.NextFrameRAF = function() {
-  requestAnimationFrame(DrawCanvas);
+  requestAnimationFrame(DrawCanvasRAF);
 };
 TagCanvas.NextFrameTimeout = function(iv) {
   setTimeout(DrawCanvas, iv);
