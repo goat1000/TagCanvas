@@ -1230,6 +1230,7 @@ TCproto.CreateTag = function(e, p) {
   if(im.length) {
     i = new Image;
     i.src = im[0].src;
+	i.onerror = im[0].onerror;
     t = new Tag(this, i, e, p, 0, 0);
     AddImage(i, im[0], t, this);
     return t;
