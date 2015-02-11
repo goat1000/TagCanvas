@@ -15,7 +15,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 /**
- * jQuery.tagcanvas 2.6
+ * jQuery.tagcanvas 2.6.1
  * For more information, please contact <graham@goat1000.com>
  */
 (function($){
@@ -1283,6 +1283,7 @@ function TagCanvas(cid,lctr,opt) {
   this.source = lctr || cid;
   this.transform = Matrix.Identity();
   this.startTime = this.time = TimeNow();
+  this.mx = this.my = -1;
   this.Animate = this.dragControl ? this.AnimateDrag : this.AnimatePosition;
   this.animTiming = (typeof TagCanvas[this.animTiming] == 'function' ?
     TagCanvas[this.animTiming] : TagCanvas.Smooth);
