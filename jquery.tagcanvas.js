@@ -15,7 +15,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 /**
- * jQuery.tagcanvas 2.6.1
+ * jQuery.tagcanvas 2.7
  * For more information, please contact <graham@goat1000.com>
  */
 (function($){
@@ -183,6 +183,18 @@ function PointsOnRingV(n, xr, yr, zr, offset) {
 function PointsOnRingH(n, xr, yr, zr, offset) {
   offset = isNaN(offset) ? 0 : offset * 1;
   return Ring(1, n, xr, yr, zr, offset);
+}
+function CentreImage(t) {
+  var i = new Image;
+  i.onload = function() {
+    var dx = i.width / 2, dy = i.height / 2;
+    t.centreFunc = function(c, w, h, cx, cy) {
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.globalAlpha = 1;
+      c.drawImage(i, cx - dx, cy - dy);
+    };
+  };
+  i.src = t.centreImage;
 }
 function SetAlpha(c,a) {
   var d = c, p1, p2, ae = (a*1).toPrecision(3) + ')';
@@ -710,25 +722,47 @@ function MouseUp(e) {
   if(tg && e.button == cb && t.tc[tg]) {
     tc = t.tc[tg];
     MouseMove(e);
-    if(!tc.EndDrag() && !tc.touched)
+    if(!tc.EndDrag() && !tc.touchState)
       tc.Clicked(e);
   }
 }
 function TouchDown(e) {
-  var t = TagCanvas, tg = EventToCanvasId(e);
-  if(tg && e.changedTouches && t.tc[tg]) {
-    t.tc[tg].touched = 1;
-    t.tc[tg].BeginDrag(e);
+  var tg = EventToCanvasId(e), tc = (tg && TagCanvas.tc[tg]), p;
+  if(tc && e.changedTouches) {
+    if(e.touches.length == 1 && tc.touchState == 0) {
+      tc.touchState = 1;
+      tc.BeginDrag(e);
+      if(p = EventXY(e, tc.canvas)) {
+        tc.mx = p.x;
+        tc.my = p.y;
+        tc.drawn = 0;
+      }
+    } else if(e.targetTouches.length == 2 && tc.pinchZoom) {
+      tc.touchState = 3;
+      tc.EndDrag();
+      tc.BeginPinch(e);
+    } else {
+      tc.EndDrag();
+      tc.EndPinch();
+      tc.touchState = 0;
+    }
   }
 }
 function TouchUp(e) {
-  var t = TagCanvas, tg = EventToCanvasId(e);
-  if(tg && e.changedTouches && t.tc[tg]) {
-    TouchMove(e);
-    if(!t.tc[tg].EndDrag()){
-      t.tc[tg].Draw();
-      t.tc[tg].Clicked(e);
+  var tg = EventToCanvasId(e), tc = (tg && TagCanvas.tc[tg]);
+  if(tc && e.changedTouches) {
+    switch(tc.touchState) {
+    case 1:
+      tc.Draw();
+      tc.Clicked();
+      break;
+    case 2:
+      tc.EndDrag();
+      break;
+    case 3:
+      tc.EndPinch();
     }
+    tc.touchState = 0;
   }
 }
 function TouchMove(e) {
@@ -740,12 +774,20 @@ function TouchMove(e) {
       tc.tttimer = null;
     }
   }
-  if(tg && t.tc[tg] && e.changedTouches) {
-    tc = t.tc[tg];
-    if(p = EventXY(e, tc.canvas)) {
-      tc.mx = p.x;
-      tc.my = p.y;
-      tc.Drag(e, p);
+  tc = (tg && t.tc[tg]);
+  if(tc && e.changedTouches && tc.touchState) {
+    switch(tc.touchState) {
+    case 1:
+    case 2:
+      if(p = EventXY(e, tc.canvas)) {
+        tc.mx = p.x;
+        tc.my = p.y;
+        if(tc.Drag(e, p))
+          tc.touchState = 2;
+      }
+      break;
+    case 3:
+      tc.Pinch(e);
     }
     tc.drawn = 0;
   }
@@ -1265,9 +1307,10 @@ function TagCanvas(cid,lctr,opt) {
 
   this.canvas = c;
   this.ctxt = c.getContext('2d');
-  this.z1 = 250 / this.depth;
+  this.z1 = 250 / max(this.depth, 0.001);
   this.z2 = this.z1 / this.zoom;
   this.radius = min(c.height, c.width) * 0.0075; // fits radius of 100 in canvas
+  this.max_radius = 100;
   this.max_weight = [];
   this.min_weight = [];
   this.textFont = this.textFont && FixFont(this.textFont);
@@ -1278,12 +1321,17 @@ function TagCanvas(cid,lctr,opt) {
   this.ctxt.textBaseline = 'top';
   this.lx = (this.lock + '').indexOf('x') + 1;
   this.ly = (this.lock + '').indexOf('y') + 1;
-  this.frozen = this.dx = this.dy = this.fixedAnim = this.touched = 0;
+  this.frozen = this.dx = this.dy = this.fixedAnim = this.touchState = 0;
   this.fixedAlpha = 1;
   this.source = lctr || cid;
+  this.repeatTags = min(64, ~~this.repeatTags);
+  this.minTags = min(200, ~~this.minTags);
+  if(this.minTags > 0 && this.repeatTags < 1 && (i = this.GetTags().length))
+    this.repeatTags = ceil(this.minTags / i) - 1;
   this.transform = Matrix.Identity();
   this.startTime = this.time = TimeNow();
   this.mx = this.my = -1;
+  this.centreImage && CentreImage(this);
   this.Animate = this.dragControl ? this.AnimateDrag : this.AnimatePosition;
   this.animTiming = (typeof TagCanvas[this.animTiming] == 'function' ?
     TagCanvas[this.animTiming] : TagCanvas.Smooth);
@@ -1370,11 +1418,13 @@ TCproto.HideTags = function() {
     el[i].style.display = 'none';
 };
 TCproto.GetTags = function() {
-  var el = this.SourceElements(), etl, tl = [], i, j;
-  for(i = 0; i < el.length; ++i) {
-    etl = el[i].getElementsByTagName('a');
-    for(j = 0; j < etl.length; ++j) {
-      tl.push(etl[j]);
+  var el = this.SourceElements(), etl, tl = [], i, j, k;
+  for(k = 0; k <= this.repeatTags; ++k) {
+    for(i = 0; i < el.length; ++i) {
+      etl = el[i].getElementsByTagName('a');
+      for(j = 0; j < etl.length; ++j) {
+        tl.push(etl[j]);
+      }
     }
   }
   return tl;
@@ -1511,7 +1561,10 @@ TCproto.Load = function() {
     } else {
       shapeArgs = this.shape.toString().split(/[(),]/);
       shape = shapeArgs.shift();
-      this.shape = pfuncs[shape] || pfuncs.sphere;
+      if(typeof window[shape] === 'function')
+        this.shape = window[shape];
+      else
+        this.shape = pfuncs[shape] || pfuncs.sphere;
       this.shapeArgs = [taglist.length, rx, ry, rz].concat(shapeArgs);
     }
     vl = this.shape.apply(this, this.shapeArgs);
@@ -1823,11 +1876,32 @@ TCproto.Drag = function(e, p) {
       this.down = p;
     }
   }
+  return this.dragging;
 };
 TCproto.EndDrag = function() {
   var res = this.dragging;
   this.dragging = this.down = null;
   return res;
+};
+function PinchDistance(e) {
+  var t1 = e.targetTouches[0], t2 = e.targetTouches[1];
+  return sqrt(pow(t2.pageX - t1.pageX, 2) + pow(t2.pageY - t1.pageY, 2));
+}
+TCproto.BeginPinch = function(e) {
+  this.pinched = [PinchDistance(e), this.zoom];
+  e.preventDefault && e.preventDefault();
+};
+TCproto.Pinch = function(e) {
+  var z, d, p = this.pinched;
+  if(!p)
+    return;
+  d = PinchDistance(e);
+  z = p[1] * d / p[0];
+  this.zoom = min(this.zoomMax,max(this.zoomMin,z));
+  this.Zoom(this.zoom);
+};
+TCproto.EndPinch = function(e) {
+  this.pinched = null;
 };
 TCproto.Pause = function() { this.paused = true; };
 TCproto.Resume = function() { this.paused = false; };
@@ -2014,7 +2088,11 @@ imagePosition: null,
 imagePadding: 2,
 imageAlign: 'centre',
 imageVAlign: 'middle',
-noTagsMessage: true
+noTagsMessage: true,
+centreImage: null,
+pinchZoom: false,
+repeatTags: 0,
+minTags: 0
 };
 for(i in TagCanvas.options) TagCanvas[i] = TagCanvas.options[i];
 window.TagCanvas = TagCanvas;
