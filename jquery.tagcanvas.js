@@ -15,7 +15,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 /**
- * jQuery.tagcanvas 2.7
+ * jQuery.tagcanvas 2.8
  * For more information, please contact <graham@goat1000.com>
  */
 (function($){
@@ -341,7 +341,7 @@ TCVproto.Align = function(size, space, a) {
 };
 TCVproto.Create = function(colour, bgColour, bgOutline, bgOutlineThickness,
   shadowColour, shadowBlur, shadowOffsets, padding, radius) {
-  var cv, cw, ch, c, x1, x2, y1, y2, offx, offy, ix, iy, iw, ih,
+  var cv, cw, ch, c, x1, x2, y1, y2, offx, offy, ix, iy, iw, ih, rr,
     sox = abs(shadowOffsets[0]), soy = abs(shadowOffsets[1]), shadowcv, shadowc;
   padding = max(padding, sox + shadowBlur, soy + shadowBlur);
   x1 = 2 * (padding + bgOutlineThickness);
@@ -385,15 +385,16 @@ TCVproto.Create = function(colour, bgColour, bgOutline, bgOutlineThickness,
   x1 = y1 = bgOutlineThickness / 2;
   x2 = cw - bgOutlineThickness;
   y2 = ch - bgOutlineThickness;
+  rr = min(radius, x2 / 2, y2 / 2);
   c = cv.getContext('2d');
   if(bgColour) {
     c.fillStyle = bgColour;
-    RRect(c, x1, y1, x2, y2, radius);
+    RRect(c, x1, y1, x2, y2, rr);
   }
   if(bgOutlineThickness) {
     c.strokeStyle = bgOutline;
     c.lineWidth = bgOutlineThickness;
-    RRect(c, x1, y1, x2, y2, radius, true);
+    RRect(c, x1, y1, x2, y2, rr, true);
   }
   if(shadowBlur || sox || soy) {
     // use a transparent canvas to draw on
@@ -442,7 +443,7 @@ function AddBackgroundToImage(i, w, h, scale, colour, othickness, ocolour,
   padding, radius, ofill) {
   var cw = w + ((2 * padding) + othickness) * scale,
     ch = h + ((2 * padding) + othickness) * scale,
-    cv = NewCanvas(cw, ch), c, x1, y1, x2, y2, ocanvas, cc;
+    cv = NewCanvas(cw, ch), c, x1, y1, x2, y2, ocanvas, cc, rr;
   if(!cv)
     return null;
   othickness *= scale;
@@ -452,14 +453,15 @@ function AddBackgroundToImage(i, w, h, scale, colour, othickness, ocolour,
   y2 = ch - othickness;
   padding = (padding * scale) + x1; // add space for outline
   c = cv.getContext('2d');
+  rr = min(radius, x2 / 2, y2 / 2);
   if(colour) {
     c.fillStyle = colour;
-    RRect(c, x1, y1, x2, y2, radius);
+    RRect(c, x1, y1, x2, y2, rr);
   }
   if(othickness) {
     c.strokeStyle = ocolour;
     c.lineWidth = othickness;
-    RRect(c, x1, y1, x2, y2, radius, true);
+    RRect(c, x1, y1, x2, y2, rr, true);
   }
   
   if(ofill) {
@@ -478,6 +480,37 @@ function AddBackgroundToImage(i, w, h, scale, colour, othickness, ocolour,
     c.drawImage(i, padding, padding, i.width, i.height);
   }
   return {image: cv, width: cw / scale, height: ch / scale};
+}
+/**
+ * Rounds off the corners of an image
+ */
+function RoundImage(i, r, iw, ih, s) {
+  var cv, c, r1 = parseFloat(r), l = max(iw, ih);
+  cv = NewCanvas(iw, ih);
+  if(!cv)
+    return null;
+  if(r.indexOf('%') > 0)
+    r1 = l * r1 / 100;
+  else
+    r1 = r1 * s;
+  c = cv.getContext('2d');
+  c.globalCompositeOperation = 'source-over';
+  c.fillStyle = '#fff';
+  if(r1 >= l/2) {
+    r1 = min(iw,ih) / 2;
+    c.beginPath();
+    c.moveTo(iw/2,ih/2);
+    c.arc(iw/2,ih/2,r1,0,2*Math.PI,false);
+    c.fill();
+    c.closePath();
+  } else {
+    r1 = min(iw/2,ih/2,r1);
+    RRect(c, 0, 0, iw, ih, r1, true);
+    c.fill();
+  }
+  c.globalCompositeOperation = 'source-in';
+  c.drawImage(i, 0, 0, iw, ih);
+  return cv;
 }
 /**
  * Creates a new canvas containing the image and its shadow
@@ -592,6 +625,8 @@ function AddImage(i, o, t, tc) {
       ih = t.ih;
       mscale = 1;
     }
+    if(parseFloat(tc.imageRadius))
+      t.image = t.fimage = i = RoundImage(t.image, tc.imageRadius, iw, ih, mscale);
     if(!t.HasText()) {
       if(tc.shadow) {
         ic = AddShadowToImage(t.image, iw, ih, mscale, tc.shadow, tc.shadowBlur,
@@ -801,6 +836,19 @@ function MouseWheel(e) {
     t.tc[tg].Wheel((e.wheelDelta || e.detail) > 0);
   }
 }
+function Scroll(e) {
+  var i, t = TagCanvas;
+  clearTimeout(t.scrollTimer);
+  for(i in t.tc) {
+    t.tc[i].Pause();
+  }
+  t.scrollTimer = setTimeout(function() {
+    var i, t = TagCanvas;
+    for(i in t.tc) {
+      t.tc[i].Resume();
+    }
+  }, t.scrollPause);
+}
 function DrawCanvas() {
   DrawCanvasRAF(TimeNow());
 }
@@ -930,8 +978,9 @@ Oproto.Update = function(x,y,w,h,sc,z,xo,yo) {
   this.z = z;
 };
 Oproto.DrawOutline = function(c,x,y,w,h,colour) {
+  var r = min(this.radius, h/2, w/2);
   c.strokeStyle = colour;
-  RRect(c, x, y, w, h, this.radius, true);
+  RRect(c, x, y, w, h, r, true);
 };
 Oproto.DrawColour = function(c,x,y,w,h,colour,tag,x1,y1) {
   if(tag.oimage) {
@@ -979,8 +1028,9 @@ Oproto.DrawColourImage = function(c,x,y,w,h,colour,tag,x1,y1) {
   return 1;
 };
 Oproto.DrawBlock = function(c,x,y,w,h,colour) {
+  var r = min(this.radius, h/2, w/2);
   c.fillStyle = colour;
-  RRect(c, x, y, w, h, this.radius);
+  RRect(c, x, y, w, h, r);
 };
 Oproto.DrawSimple = function(c, tag, x1, y1) {
   var t = this.tc;
@@ -1315,6 +1365,7 @@ function TagCanvas(cid,lctr,opt) {
   this.min_weight = [];
   this.textFont = this.textFont && FixFont(this.textFont);
   this.textHeight *= 1;
+  this.imageRadius = this.imageRadius.toString();
   this.pulsateTo = Clamp(this.pulsateTo, 0, 1);
   this.minBrightness = Clamp(this.minBrightness, 0, 1);
   this.maxBrightness = Clamp(this.maxBrightness, this.minBrightness, 1);
@@ -1326,6 +1377,10 @@ function TagCanvas(cid,lctr,opt) {
   this.source = lctr || cid;
   this.repeatTags = min(64, ~~this.repeatTags);
   this.minTags = min(200, ~~this.minTags);
+  if(~~this.scrollPause > 0)
+    TagCanvas.scrollPause = ~~this.scrollPause;
+  else
+    this.scrollPause = 0;
   if(this.minTags > 0 && this.repeatTags < 1 && (i = this.GetTags().length))
     this.repeatTags = ceil(this.minTags / i) - 1;
   this.transform = Matrix.Identity();
@@ -1392,8 +1447,13 @@ function TagCanvas(cid,lctr,opt) {
       handlers[cid].push(['mousewheel', MouseWheel]);
       handlers[cid].push(['DOMMouseScroll', MouseWheel]);
     }
-    for(i = 0; i < handlers[cid].length; ++i)
-      AddHandler(handlers[cid][i][0], handlers[cid][i][1], c);
+    if(this.scrollPause) {
+      handlers[cid].push(['scroll', Scroll, window]);
+    }
+    for(i = 0; i < handlers[cid].length; ++i) {
+      p = handlers[cid][i];
+      AddHandler(p[0], p[1], p[2] ? p[2] : c);
+    }
   }
   if(!TagCanvas.started) {
     raf = window.requestAnimationFrame = window.requestAnimationFrame ||
@@ -2092,7 +2152,9 @@ noTagsMessage: true,
 centreImage: null,
 pinchZoom: false,
 repeatTags: 0,
-minTags: 0
+minTags: 0,
+imageRadius: 0,
+scrollPause: false
 };
 for(i in TagCanvas.options) TagCanvas[i] = TagCanvas.options[i];
 window.TagCanvas = TagCanvas;
