@@ -1292,6 +1292,7 @@ Tproto.Calc = function(m,a) {
   this.z = pp.z;
   this.sc = pp.w;
   this.alpha = a * Clamp(mnb + (mxb - mnb) * (r - this.z) / (2 * r), 0, 1);
+  return this.xformed;
 };
 Tproto.UpdateActive = function(c, xoff, yoff) {
   var o = this.outline, w = this.w, h = this.h,
@@ -1987,7 +1988,7 @@ TCproto.FindTag = function(t) {
       return this.taglist[i];
 };
 TCproto.RotateTag = function(tag, lt, lg, time, callback, active) {
-  var t = tag.xformed, v1 = new Vector(t.x, t.y, t.z),
+  var t = tag.Calc(this.transform, 1), v1 = new Vector(t.x, t.y, t.z),
     v2 = MakeVector(lg, lt), angle = v1.angle(v2), u = v1.cross(v2).unit();
   if(angle == 0) {
     this.fixedCallbackTag = tag;
