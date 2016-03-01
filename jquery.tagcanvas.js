@@ -15,7 +15,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 /**
- * jQuery.tagcanvas 2.8
+ * jQuery.tagcanvas 2.9
  * For more information, please contact <graham@goat1000.com>
  */
 (function($){
@@ -143,8 +143,9 @@ Mproto.xform = function(p) {
   a.z = x * this[1][3] + y * this[2][3] + z * this[3][3];
   return a;
 };
-function PointsOnSphere(n,xr,yr,zr) {
-  var i, y, r, phi, pts = [], inc = Math.PI * (3-sqrt(5)), off = 2/n;
+function PointsOnSphere(n,xr,yr,zr,magic) {
+  var i, y, r, phi, pts = [], off = 2/n, inc;
+  inc = Math.PI * (3 - sqrt(5) + (parseFloat(magic) ? parseFloat(magic) : 0));
   for(i = 0; i < n; ++i) {
     y = i * off - 1 + (off / 2);
     r = sqrt(1 - y*y);
@@ -153,8 +154,9 @@ function PointsOnSphere(n,xr,yr,zr) {
   }
   return pts;
 }
-function Cylinder(n,o,xr,yr,zr) {
-  var phi, pts = [], inc = Math.PI * (3-sqrt(5)), off = 2/n, i, j, k, l;
+function Cylinder(n,o,xr,yr,zr,magic) {
+  var phi, pts = [], off = 2/n, inc, i, j, k, l;
+  inc = Math.PI * (3 - sqrt(5) + (parseFloat(magic) ? parseFloat(magic) : 0));
   for(i = 0; i < n; ++i) {
     j = i * off - 1 + (off / 2);
     phi = i * inc;
@@ -174,8 +176,8 @@ function Ring(o, n, xr, yr, zr, j) {
   }
   return pts;
 }
-function PointsOnCylinderV(n,xr,yr,zr) { return Cylinder(n, 0, xr, yr, zr) }
-function PointsOnCylinderH(n,xr,yr,zr) { return Cylinder(n, 1, xr, yr, zr) }
+function PointsOnCylinderV(n,xr,yr,zr,m) { return Cylinder(n, 0, xr, yr, zr, m) }
+function PointsOnCylinderH(n,xr,yr,zr,m) { return Cylinder(n, 1, xr, yr, zr, m) }
 function PointsOnRingV(n, xr, yr, zr, offset) {
   offset = isNaN(offset) ? 0 : offset * 1;
   return Ring(0, n, xr, yr, zr, offset);
@@ -647,7 +649,7 @@ function AddImage(i, o, t, tc) {
         if(tc.outlineMethod == 'colour') {
           // create the outline version first, using the current image state
           ic = AddBackgroundToImage(t.fimage, iw, ih, mscale, bc,
-            tc.bgOutlineThickness, tc.outlineColour, tc.padding, tc.bgRadius, 1);
+            tc.bgOutlineThickness, t.outline.colour, tc.padding, tc.bgRadius, 1);
           if(ic)
             t.oimage = ic.image;
         }
@@ -941,13 +943,22 @@ TSproto.SplitWidth = function(w, c, f, h) {
  * @constructor
  */
 function Outline(tc,t) {
-  this.ts = TimeNow();
+  this.ts = null;
   this.tc = tc;
   this.tag = t;
   this.x = this.y = this.w = this.h = this.sc = 1;
   this.z = 0;
-  this.Draw = tc.pulsateTo < 1 && tc.outlineMethod != 'colour' ? 
-    this.DrawPulsate : this.DrawSimple;
+  this.pulse = 1;
+  this.pulsate = tc.pulsateTo < 1;
+  this.colour = tc.outlineColour;
+  this.adash = ~~tc.outlineDash;
+  this.agap = ~~tc.outlineDashSpace || this.adash;
+  this.aspeed = tc.outlineDashSpeed * 1;
+  if(this.colour == 'tag')
+    this.colour = GetProperty(t.a, 'color');
+  else if(this.colour == 'tagbg')
+    this.colour = GetProperty(t.a, 'background-color');
+  this.Draw = this.pulsate ? this.DrawPulsate : this.DrawSimple;
   this.radius = tc.outlineRadius | 0;
   this.SetMethod(tc.outlineMethod);
 }
@@ -958,7 +969,7 @@ Oproto.SetMethod = function(om) {
     colour: ['PreDraw','DrawColour'],
     outline: ['PostDraw','DrawOutline'],
     classic: ['LastDraw','DrawOutline'],
-    size: ['PreDraw','DrawColour'],
+    size: ['PreDraw','DrawSize'],
     none: ['LastDraw']
   }, funcs = methods[om] || methods.outline;
   if(om == 'none') {
@@ -977,14 +988,66 @@ Oproto.Update = function(x,y,w,h,sc,z,xo,yo) {
   this.sc = sc; // used to determine frontmost
   this.z = z;
 };
+Oproto.Ants = function(c) {
+  if(!this.adash)
+    return;
+  var l = this.adash, g = this.agap, s = this.aspeed, length = l + g,
+    l1 = 0, l2 = l, g1 = g, g2 = 0, seq = 0, ants;
+  if(s) {
+    seq = abs(s) * (TimeNow() - this.ts) / 50;
+    if(s < 0)
+      seq = 8.64e6 - seq;
+    s = ~~seq % length;
+  }
+  if(s) {
+    if(l >= s) {
+      l1 = l - s;
+      l2 = s;
+    } else {
+      g1 = length - s;
+      g2 = g - g1;
+    }
+    ants = [l1, g1, l2, g2];
+  } else {
+    ants = [l,g];
+  }
+  c.setLineDash(ants);
+}
 Oproto.DrawOutline = function(c,x,y,w,h,colour) {
   var r = min(this.radius, h/2, w/2);
   c.strokeStyle = colour;
+  this.Ants(c);
   RRect(c, x, y, w, h, r, true);
+};
+Oproto.DrawSize = function(c,x,y,w,h,colour,tag,x1,y1) {
+  var tw = tag.w, th = tag.h, m, i, sc;
+  if(this.pulsate) {
+    if(tag.image)
+      sc = (tag.image.height + this.tc.outlineIncrease) / tag.image.height;
+    else
+      sc = tag.oscale;
+    i = tag.fimage || tag.image;
+    m = 1 + ((sc - 1) * (1-this.pulse));
+    tag.h *= m;
+    tag.w *= m;
+  } else {
+    i = tag.oimage;
+  }
+  tag.alpha = 1;
+  tag.Draw(c, x1, y1, i);
+  tag.h = th;
+  tag.w = tw;
+  return 1;
 };
 Oproto.DrawColour = function(c,x,y,w,h,colour,tag,x1,y1) {
   if(tag.oimage) {
-    tag.alpha = 1;
+    if(this.pulse < 1) {
+      tag.alpha = 1 - pow(this.pulse, 2);
+      tag.Draw(c, x1, y1, tag.fimage);
+      tag.alpha = this.pulse;
+    } else {
+      tag.alpha = 1;
+    }
     tag.Draw(c, x1, y1, tag.oimage);
     return 1;
   }
@@ -1011,7 +1074,11 @@ Oproto.DrawColourImage = function(c,x,y,w,h,colour,tag,x1,y1) {
 
   cc.drawImage(ccanvas,fx,fy,fw,fh,0,0,fw,fh);
   c.clearRect(fx,fy,fw,fh);
-  tag.alpha = 1;
+  if(this.pulsate) {
+    tag.alpha = 1 - pow(this.pulse, 2);
+  } else {
+    tag.alpha = 1;
+  }
   tag.Draw(c,x1,y1);
   c.setTransform(1,0,0,1,0,0);
   c.save();
@@ -1022,6 +1089,7 @@ Oproto.DrawColourImage = function(c,x,y,w,h,colour,tag,x1,y1) {
   c.fillStyle = colour;
   c.fillRect(fx,fy,fw,fh);
   c.restore();
+  c.globalAlpha = 1;
   c.globalCompositeOperation = 'destination-over';
   c.drawImage(ocanvas,0,0,fw,fh,fx,fy,fw,fh);
   c.globalCompositeOperation = 'source-over';
@@ -1032,28 +1100,31 @@ Oproto.DrawBlock = function(c,x,y,w,h,colour) {
   c.fillStyle = colour;
   RRect(c, x, y, w, h, r);
 };
-Oproto.DrawSimple = function(c, tag, x1, y1) {
+Oproto.DrawSimple = function(c, tag, x1, y1, ga, useGa) {
   var t = this.tc;
   c.setTransform(1,0,0,1,0,0);
-  c.strokeStyle = t.outlineColour;
+  c.strokeStyle = this.colour;
   c.lineWidth = t.outlineThickness;
   c.shadowBlur = c.shadowOffsetX = c.shadowOffsetY = 0;
-  c.globalAlpha = 1;
-  return this.drawFunc(c,this.x,this.y,this.w,this.h,t.outlineColour,tag,x1,y1);
+  c.globalAlpha = useGa ? ga : 1;
+  return this.drawFunc(c,this.x,this.y,this.w,this.h,this.colour,tag,x1,y1);
 };
 Oproto.DrawPulsate = function(c, tag, x1, y1) {
-  var diff = TimeNow() - this.ts, t = this.tc;
-  c.setTransform(1,0,0,1,0,0);
-  c.strokeStyle = t.outlineColour;
-  c.lineWidth = t.outlineThickness;
-  c.shadowBlur = c.shadowOffsetX = c.shadowOffsetY = 0;
-  c.globalAlpha = t.pulsateTo + ((1 - t.pulsateTo) * 
+  var diff = TimeNow() - this.ts, t = this.tc,
+    ga = t.pulsateTo + ((1 - t.pulsateTo) * 
     (0.5 + (cos(2 * Math.PI * diff / (1000 * t.pulsateTime)) / 2)));
-  return this.drawFunc(c,this.x,this.y,this.w,this.h,t.outlineColour,tag,x1,y1);
+  this.pulse = ga = TagCanvas.Smooth(1,ga);
+  return this.DrawSimple(c, tag, x1, y1, ga, 1);
 };
 Oproto.Active = function(c,x,y) {
-  return (x >= this.x && y >= this.y &&
+  var a = (x >= this.x && y >= this.y &&
     x <= this.x + this.w && y <= this.y + this.h);
+  if(a) {
+    this.ts = this.ts || TimeNow();
+  } else {
+    this.ts = null;
+  }
+  return a;
 };
 Oproto.PreDraw = Oproto.PostDraw = Oproto.LastDraw = Nop;
 /**
@@ -1081,11 +1152,11 @@ function Tag(tc, text, a, v, w, h, col, bcol, bradius, boutline, bothickness,
   this.padding = padding | 0;
   this.sc = this.alpha = 1;
   this.weighted = !tc.weight;
+  this.outline = new Outline(tc,this);
 }
 Tproto = Tag.prototype;
 Tproto.Init = function(e) {
   var tc = this.tc;
-  this.outline = new Outline(tc,this);
   this.textHeight = tc.textHeight;
   if(this.HasText()) {
     this.Measure(tc.ctxt,tc);
@@ -1151,7 +1222,7 @@ Tproto.Measure = function(c,t) {
 
     // add outline image using highlight colour
     if(t.outlineMethod == 'colour') {
-      this.oimage = tcv.Create(t.outlineColour, this.bgColour, t.outlineColour,
+      this.oimage = tcv.Create(this.outline.colour, this.bgColour, this.outline.colour,
         s * this.bgOutlineThickness, t.shadow, s * t.shadowBlur, soff,
         s * this.padding, s * this.bgRadius);
 
@@ -1174,6 +1245,7 @@ Tproto.Measure = function(c,t) {
         s * this.bgOutlineThickness, t.shadow, s * t.shadowBlur, soff,
         s * this.padding, s * this.bgRadius);
 
+      this.oscale = this.oimage.width / img.width;
       if(t.outlineIncrease > 0)
         img = ExpandImage(img, this.oimage.width, this.oimage.height);
       else
@@ -1224,6 +1296,8 @@ Tproto.Weight = function(w, c, t, m, wmin, wmax, wnum) {
     this.bgColour = FindGradientColour(t, nweight, wnum);
   else if('bgoutline' == m)
     this.bgOutline = FindGradientColour(t, nweight, wnum);
+  else if('outline' == m)
+    this.outline.colour = FindGradientColour(t, nweight, wnum);
   else if('size' == m) {
     if(t.weightSizeMin > 0 && t.weightSizeMax > t.weightSizeMin) {
       this.textHeight = t.weightSize * 
@@ -1633,8 +1707,10 @@ TCproto.Load = function() {
     for(i = 0; i < taglist.length; ++i)
       taglist[i].position = new Vector(vl[i][0], vl[i][1], vl[i][2]);
   }
-  if(this.noTagsMessage && !taglist.length)
-    taglist = this.Message('No tags');
+  if(this.noTagsMessage && !taglist.length) {
+    i = (this.imageMode && this.imageMode != 'both' ? this.imageMode + ' ': '');
+    taglist = this.Message('No ' + i + 'tags');
+  }
   this.taglist = taglist;
 };
 TCproto.Update = function() {
@@ -2155,7 +2231,10 @@ pinchZoom: false,
 repeatTags: 0,
 minTags: 0,
 imageRadius: 0,
-scrollPause: false
+scrollPause: false,
+outlineDash: 0,
+outlineDashSpace: 0,
+outlineDashSpeed: 1
 };
 for(i in TagCanvas.options) TagCanvas[i] = TagCanvas.options[i];
 window.TagCanvas = TagCanvas;
