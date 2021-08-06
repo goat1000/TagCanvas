@@ -15,7 +15,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 /**
- * jQuery.tagcanvas 2.10
+ * jQuery.tagcanvas 2.11
  * For more information, please contact <graham@goat1000.com>
  */
 (function($){
@@ -82,6 +82,7 @@ function AudioIcon(mute,c,size,offsetx,offsety,stroke,colour) {
   var x2 = x + w, x1 = x2 - d;
   var y3 = y + h, y2 = y3 - e, y1 = y + e, y4 = y + h / 2;
   c.setTransform(1, 0, 0, 1, 0, 0);
+  c.setLineDash([]);
   c.globalAlpha = 1;
   c.strokeStyle = colour;
   c.lineWidth = stroke;
@@ -633,13 +634,15 @@ function RemoveHandler(h,f,e) {
   else
     e.detachEvent('on' + h, f);
 }
-function AddImage(i, o, t, tc) {
+function AddImage(i, o, alt, t, tc) {
   var s = tc.imageScale, mscale, ic, bc, oc, iw, ih;
   // image not loaded, wait for image onload
   if(!o.complete)
-    return AddHandler('load',function() { AddImage(i,o,t,tc); }, o);
+    return AddHandler('load',function() { AddImage(i,o,alt,t,tc); }, o);
   if(!i.complete)
-    return AddHandler('load',function() { AddImage(i,o,t,tc); }, i);
+    return AddHandler('load',function() { AddImage(i,o,alt,t,tc); }, i);
+  if(alt && !alt.complete)
+    return AddHandler('load',function() { AddImage(i,o,alt,t,tc); }, alt);
 
   // Yes, this does look like nonsense, but it makes sure that both the
   // width and height are actually set and not just calculated. This is
@@ -721,6 +724,7 @@ function AddImage(i, o, t, tc) {
       }
     }
   }
+  t.alt = alt;
   t.Init();
 }
 function GetProperty(e,p) {
@@ -903,6 +907,12 @@ function DrawCanvasRAF(t) {
   for(i in tc)
     tc[i].Draw(t);
 }
+function NextFrameRAF() {
+  requestAnimationFrame(DrawCanvasRAF);
+};
+function NextFrameTimeout(iv) {
+  setTimeout(DrawCanvas, iv);
+};
 function AbsPos(id) {
   var e = doc.getElementById(id), r = e.getBoundingClientRect(),
     dd = doc.documentElement, b = doc.body, w = window,
@@ -1002,10 +1012,10 @@ function Outline(tc,t) {
     this.colour = GetProperty(t.a, 'background-color');
   this.Draw = this.pulsate ? this.DrawPulsate : this.DrawSimple;
   this.radius = tc.outlineRadius | 0;
-  this.SetMethod(tc.outlineMethod);
+  this.SetMethod(tc.outlineMethod,tc.altImage);
 }
 Oproto = Outline.prototype;
-Oproto.SetMethod = function(om) {
+Oproto.SetMethod = function(om,alt) {
   var methods = {
     block: ['PreDraw','DrawBlock'],
     colour: ['PreDraw','DrawColour'],
@@ -1020,6 +1030,10 @@ Oproto.SetMethod = function(om) {
     this.drawFunc = this[funcs[1]];
   }
   this[funcs[0]] = this.Draw;
+  if(alt) {
+    this.RealPreDraw = this.PreDraw;
+    this.PreDraw = this.DrawAlt;
+  }
 };
 Oproto.Update = function(x,y,w,h,sc,z,xo,yo) {
   var o = this.tc.outlineOffset, o2 = 2 * o;
@@ -1136,6 +1150,14 @@ Oproto.DrawColourImage = function(c,x,y,w,h,colour,tag,x1,y1) {
   c.drawImage(ocanvas,0,0,fw,fh,fx,fy,fw,fh);
   c.globalCompositeOperation = 'source-over';
   return 1;
+};
+Oproto.DrawAlt = function(c,tag,x1,y1,ga,useGa) {
+  var r = this.RealPreDraw(c,tag,x1,y1,ga,useGa);
+  if(tag.alt) {
+    tag.DrawImage(c, x1, y1, tag.alt);
+    r = 1;
+  }
+  return r;
 };
 Oproto.DrawBlock = function(c,x,y,w,h,colour) {
   var r = min(this.radius, h/2, w/2);
@@ -1501,7 +1523,7 @@ Tproto.PlayAudio = function() {
  * @constructor
  */
 function TagCanvas(cid,lctr,opt) {
-  var i, p, c = doc.getElementById(cid), cp = ['id','class','innerHTML'], raf;
+  var i, p, c = doc.getElementById(cid), cp = ['id','class','innerHTML'];
 
   if(!c) throw 0;
   if(Defined(window.G_vmlCanvasManager)) {
@@ -1626,11 +1648,8 @@ function TagCanvas(cid,lctr,opt) {
     }
   }
   if(!TagCanvas.started) {
-    raf = window.requestAnimationFrame = window.requestAnimationFrame ||
-      window.mozRequestAnimationFrame || window.webkitRequestAnimationFrame ||
-      window.msRequestAnimationFrame;
-    TagCanvas.NextFrame = raf ? TagCanvas.NextFrameRAF :
-      TagCanvas.NextFrameTimeout;
+    TagCanvas.NextFrame = window.requestAnimationFrame ? NextFrameRAF :
+      NextFrameTimeout;
     TagCanvas.interval = this.interval;
     TagCanvas.NextFrame(this.interval);
     TagCanvas.started = 1;
@@ -1698,7 +1717,7 @@ TCproto.CreateTag = function(e) {
         t = new Tag(this, "", e, p, 0, 0);
         t.SetImage(i);
         //t.Init();
-        AddImage(i, im[0], t, this);
+        AddImage(i, im[0], im[1], t, this);
         this.AddAudio(e, t);
         return t;
       }
@@ -1725,7 +1744,7 @@ TCproto.CreateTag = function(e) {
       boc, this.bgOutlineThickness, font, this.padding, ts && ts.original);
     if(i) {
       t.SetImage(i);
-      AddImage(i, im[0], t, this);
+      AddImage(i, im[0], im[1], t, this);
     } else {
       t.Init();
     }
@@ -2305,12 +2324,6 @@ TagCanvas.Delete = function(id) {
   delete handlers[id];
   delete TagCanvas.tc[id];
 };
-TagCanvas.NextFrameRAF = function() {
-  requestAnimationFrame(DrawCanvasRAF);
-};
-TagCanvas.NextFrameTimeout = function(iv) {
-  setTimeout(DrawCanvas, iv);
-};
 TagCanvas.tc = {};
 TagCanvas.options = {
 z1: 20000,
@@ -2409,7 +2422,8 @@ audioVolume: 1,
 audioIcon: 1,
 audioIconSize: 20,
 audioIconThickness: 2,
-audioIconDark: 0
+audioIconDark: 0,
+altImage: 0
 };
 for(i in TagCanvas.options) TagCanvas[i] = TagCanvas.options[i];
 window.TagCanvas = TagCanvas;
